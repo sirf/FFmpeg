@@ -80,6 +80,7 @@ typedef struct LibOpenJPEGContext {
     AVClass *class;
     opj_dparameters_t dec_params;
     int lowqual;
+    int opj_threads;
 } LibOpenJPEGContext;
 
 static void error_callback(const char *msg, void *data)
@@ -369,6 +370,9 @@ static int libopenjpeg_decode_frame(AVCodecContext *avctx, AVFrame *picture,
     // Tie decoder with decoding parameters
     opj_setup_decoder(dec, &ctx->dec_params);
 
+    if (ctx->opj_threads)
+        opj_codec_set_threads(dec, ctx->opj_threads);
+
     stream = opj_stream_default_create(OPJ_STREAM_READ);
 
     if (!stream) {
@@ -490,6 +494,8 @@ done:
 static const AVOption options[] = {
     { "lowqual", "Limit the number of layers used for decoding",
         OFFSET(lowqual), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, INT_MAX, VD },
+    { "opj_threads", "Value to give opj_codec_set_threads()",
+        OFFSET(opj_threads), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, INT_MAX, VD },
     { NULL },
 };
 
