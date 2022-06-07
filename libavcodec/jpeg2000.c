@@ -55,8 +55,8 @@ static int32_t tag_tree_size(int w, int h)
 static int ff_jpeg2000_tag_tree_init(Jpeg2000TgtNode **old, unsigned int *size, int w, int h)
 {
     int pw = w, ph = h;
-    Jpeg2000TgtNode *t, *t2;
-    int32_t tt_size;
+    Jpeg2000TgtNode *t;
+    int32_t tt_size, ofs = 0;
     size_t prod;
 
     tt_size = tag_tree_size(w, h);
@@ -77,15 +77,15 @@ static int ff_jpeg2000_tag_tree_init(Jpeg2000TgtNode **old, unsigned int *size, 
 
         w  = (w + 1) >> 1;
         h  = (h + 1) >> 1;
-        t2 = t + pw * ph;
+        ofs += pw * ph;
 
         for (i = 0; i < ph; i++)
             for (j = 0; j < pw; j++)
-                t[i * pw + j].parent = &t2[(i >> 1) * w + (j >> 1)];
+                t[i * pw + j].parent = (i >> 1) * w + (j >> 1) + ofs;
 
-        t = t2;
+        t += pw * ph;
     }
-    t[0].parent = NULL;
+    t[0].parent = -1;
     return 0;
 }
 
@@ -320,6 +320,10 @@ static int init_prec(AVCodecContext *avctx,
                                 band->log2_cblk_height)
         - (prec->coord[1][0] >> band->log2_cblk_height);
 
+    /* \sum_{i=0}^\inf 4^-i = 4/3 */
+    if (prec->nb_codeblocks_width * (uint64_t)prec->nb_codeblocks_height > INT32_MAX / 4 * 3) {
+        return AVERROR(ENOMEM);
+    }
 
     /* Tag trees initialization */
     if (ff_jpeg2000_tag_tree_init(&prec->cblkincl,
@@ -332,10 +336,6 @@ static int init_prec(AVCodecContext *avctx,
                                   prec->nb_codeblocks_height))
         return AVERROR(ENOMEM);
 
-    if (prec->nb_codeblocks_width * (uint64_t)prec->nb_codeblocks_height > INT_MAX) {
-        prec->cblk = NULL;
-        return AVERROR(ENOMEM);
-    }
     nb_codeblocks = prec->nb_codeblocks_width * prec->nb_codeblocks_height;
     if (ff_fast_recalloc(&prec->cblk, &prec->cblk_size, nb_codeblocks, sizeof(*prec->cblk)))
         return AVERROR(ENOMEM);

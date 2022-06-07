@@ -185,24 +185,24 @@ static void jpeg2000_flush(Jpeg2000DecoderContext *s)
 }
 
 /* decode the value stored in node */
-static int tag_tree_decode(Jpeg2000DecoderContext *s, Jpeg2000TgtNode *node,
+static int tag_tree_decode(Jpeg2000DecoderContext *s, Jpeg2000TgtNode *nodes, int32_t node,
                            int threshold)
 {
     Jpeg2000TgtNode *stack[30];
     int sp = -1, curval = 0;
 
-    if (!node) {
+    if (node < 0) {
         av_log(s->avctx, AV_LOG_ERROR, "missing node\n");
         return AVERROR_INVALIDDATA;
     }
 
-    while (node && !node->vis) {
-        stack[++sp] = node;
-        node        = node->parent;
+    while (node >= 0 && !nodes[node].vis) {
+        stack[++sp] = &nodes[node];
+        node        = nodes[node].parent;
     }
 
-    if (node)
-        curval = node->val;
+    if (node >= 0)
+        curval = nodes[node].val;
     else
         curval = stack[sp]->val;
 
@@ -1161,7 +1161,7 @@ static int jpeg2000_decode_packet(Jpeg2000DecoderContext *s, Jpeg2000Tile *tile,
             if (cblk->npasses)
                 incl = get_bits(s, 1);
             else
-                incl = tag_tree_decode(s, prec->cblkincl + cblkno, layno + 1) == layno;
+                incl = tag_tree_decode(s, prec->cblkincl, cblkno, layno + 1) == layno;
             if (!incl)
                 continue;
             else if (incl < 0)
@@ -1169,7 +1169,7 @@ static int jpeg2000_decode_packet(Jpeg2000DecoderContext *s, Jpeg2000Tile *tile,
 
             if (!cblk->npasses) {
                 int v = expn[bandno] + numgbits - 1 -
-                        tag_tree_decode(s, prec->zerobits + cblkno, 100);
+                        tag_tree_decode(s, prec->zerobits, cblkno, 100);
                 if (v < 0 || v > 30) {
                     av_log(s->avctx, AV_LOG_ERROR,
                            "nonzerobits %d invalid or unsupported\n", v);
