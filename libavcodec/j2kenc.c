@@ -249,36 +249,36 @@ static void j2k_flush(Jpeg2000EncoderContext *s)
 /* tag tree routines */
 
 /** code the value stored in node */
-static void tag_tree_code(Jpeg2000EncoderContext *s, Jpeg2000TgtNode *node, int threshold)
+static void tag_tree_code(Jpeg2000EncoderContext *s, Jpeg2000TgtNode *nodes, int32_t node, int threshold)
 {
-    Jpeg2000TgtNode *stack[30];
+    int32_t stack[30];
     int sp = -1, curval = 0;
 
-    while(node->parent){
+    while(nodes[node].parent >= 0){
         stack[++sp] = node;
-        node = node->parent;
+        node = nodes[node].parent;
     }
 
     while (1) {
-        if (curval > node->temp_val)
-            node->temp_val = curval;
+        if (curval > nodes[node].temp_val)
+            nodes[node].temp_val = curval;
         else {
-            curval = node->temp_val;
+            curval = nodes[node].temp_val;
         }
 
-        if (node->val >= threshold) {
+        if (nodes[node].val >= threshold) {
             put_bits(s, 0, threshold - curval);
             curval = threshold;
         } else {
-            put_bits(s, 0, node->val - curval);
-            curval = node->val;
-            if (!node->vis) {
+            put_bits(s, 0, nodes[node].val - curval);
+            curval = nodes[node].val;
+            if (!nodes[node].vis) {
                 put_bits(s, 1, 1);
-                node->vis = 1;
+                nodes[node].vis = 1;
             }
         }
 
-        node->temp_val = curval;
+        nodes[node].temp_val = curval;
         if (sp < 0)
             break;
         node = stack[sp--];
@@ -286,13 +286,13 @@ static void tag_tree_code(Jpeg2000EncoderContext *s, Jpeg2000TgtNode *node, int 
 }
 
 /** update the value in node */
-static void tag_tree_update(Jpeg2000TgtNode *node)
+static void tag_tree_update(Jpeg2000TgtNode *nodes, int node)
 {
-    while (node->parent){
-        if (node->parent->val <= node->val)
+    while (nodes[node].parent >= 0){
+        if (nodes[nodes[node].parent].val <= nodes[node].val)
             break;
-        node->parent->val = node->val;
-        node = node->parent;
+        nodes[nodes[node].parent].val = nodes[node].val;
+        node = nodes[node].parent;
     }
 }
 
@@ -812,7 +812,7 @@ static int encode_packet(Jpeg2000EncoderContext *s, Jpeg2000ResLevel *rlevel, in
                     prec->zerobits[pos].val = expn[bandno] + numgbits - 1 - cblk->nonzerobits;
                     cblk->incl = 0;
                     cblk->lblock = 3;
-                    tag_tree_update(prec->zerobits + pos);
+                    tag_tree_update(prec->zerobits, pos);
                     for (i = 0; i < nlayers; i++) {
                         if (cblk->layers[i].npasses > 0) {
                             prec->cblkincl[pos].val = i;
@@ -821,7 +821,7 @@ static int encode_packet(Jpeg2000EncoderContext *s, Jpeg2000ResLevel *rlevel, in
                     }
                     if (i == nlayers)
                         prec->cblkincl[pos].val = i;
-                    tag_tree_update(prec->cblkincl + pos);
+                    tag_tree_update(prec->cblkincl, pos);
                 }
             }
         }
@@ -875,7 +875,7 @@ static int encode_packet(Jpeg2000EncoderContext *s, Jpeg2000ResLevel *rlevel, in
 
                 // inclusion information
                 if (!cblk->incl)
-                    tag_tree_code(s, prec->cblkincl + pos, layno + 1);
+                    tag_tree_code(s, prec->cblkincl, pos, layno + 1);
                 else {
                     put_bits(s, cblk->layers[layno].npasses > 0, 1);
                 }
@@ -885,7 +885,7 @@ static int encode_packet(Jpeg2000EncoderContext *s, Jpeg2000ResLevel *rlevel, in
 
                 // zerobits information
                 if (!cblk->incl) {
-                    tag_tree_code(s, prec->zerobits + pos, 100);
+                    tag_tree_code(s, prec->zerobits, pos, 100);
                     cblk->incl = 1;
                 }
 
