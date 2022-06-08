@@ -51,6 +51,31 @@ static int32_t tag_tree_size(int w, int h)
     return (int32_t)(res + 1);
 }
 
+#define T(x) (x*sizeof(Jpeg2000TgtNode))
+
+static const size_t tt_sizes[16] = {
+    T(1),T(3),T(6),T(7),T(3),T(5),T(9),T(11),T(6),T(9),T(14),T(17),T(7),T(11),T(17),T(21),
+};
+
+static const Jpeg2000TgtNode tt_stereotypes[16][21] = {
+    {{-1},},
+    {{2},{2},{-1},},
+    {{3},{3},{4},{5},{5},{-1},},
+    {{4},{4},{5},{5},{6},{6},{-1},},
+    {{2},{2},{-1},},
+    {{4},{4},{4},{4},{-1},},
+    {{6},{6},{7},{6},{6},{7},{8},{8},{-1},},
+    {{8},{8},{9},{9},{8},{8},{9},{9},{10},{10},{-1},},
+    {{3},{3},{4},{5},{5},{-1},},
+    {{6},{6},{6},{6},{7},{7},{8},{8},{-1},},
+    {{9},{9},{10},{9},{9},{10},{11},{11},{12},{13},{13},{13},{13},{-1},},
+    {{12},{12},{13},{13},{12},{12},{13},{13},{14},{14},{15},{15},{16},{16},{16},{16},{-1},},
+    {{4},{4},{5},{5},{6},{6},{-1},},
+    {{8},{8},{8},{8},{9},{9},{9},{9},{10},{10},{-1},},
+    {{12},{12},{13},{12},{12},{13},{14},{14},{15},{14},{14},{15},{16},{16},{16},{16},{-1},},
+    {{16},{16},{17},{17},{16},{16},{17},{17},{18},{18},{19},{19},{18},{18},{19},{19},{20},{20},{20},{20},{-1},},
+};
+
 /* allocate the memory for tag tree */
 static int ff_jpeg2000_tag_tree_init(Jpeg2000TgtNode **old, unsigned int *size, int w, int h)
 {
@@ -59,6 +84,15 @@ static int ff_jpeg2000_tag_tree_init(Jpeg2000TgtNode **old, unsigned int *size, 
     int32_t tt_size, ofs = 0;
     size_t prod;
 
+    if (w <= 4 && h <= 4) {
+        int idx = w-1 + (h-1)*4;
+        size_t sz = tt_sizes[idx];
+        av_fast_malloc(old, size, sz);
+        if (*old) {
+            memcpy(*old, tt_stereotypes[idx], sz);
+        }
+        return 0;
+    } else {
     tt_size = tag_tree_size(w, h);
 
     if (av_size_mult(tt_size, sizeof(*t), &prod))
@@ -87,6 +121,7 @@ static int ff_jpeg2000_tag_tree_init(Jpeg2000TgtNode **old, unsigned int *size, 
     }
     t[0].parent = -1;
     return 0;
+    }
 }
 
 void ff_tag_tree_zero(Jpeg2000TgtNode *t, int w, int h, int val)
