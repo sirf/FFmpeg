@@ -48,6 +48,8 @@ typedef struct DWTContext {
     uint8_t type;                        ///< 0 for 9/7; 1 for 5/3
     int32_t *i_linebuf;                  ///< int buffer used by transform
     float   *f_linebuf;                  ///< float buffer used by transform
+    int max_slices;
+    int linesize;
 } DWTContext;
 
 /**
@@ -58,10 +60,11 @@ typedef struct DWTContext {
  * @param type              0 for DWT 9/7; 1 for DWT 5/3
  */
 int ff_jpeg2000_dwt_init(DWTContext *s, int border[2][2],
-                         int decomp_levels, int type);
+                         int decomp_levels, int type, int max_slices);
 
 int ff_dwt_encode(DWTContext *s, void *t);
 int ff_dwt_decode(DWTContext *s, void *t);
+int ff_dwt_decode_thread(DWTContext *s, void *t, int lev, int dir, int slice, int slices);
 
 void ff_dwt_destroy(DWTContext *s);
 

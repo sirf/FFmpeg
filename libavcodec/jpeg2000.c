@@ -467,7 +467,7 @@ int ff_jpeg2000_init_component(Jpeg2000Component *comp,
                                Jpeg2000CodingStyle *codsty,
                                Jpeg2000QuantStyle *qntsty,
                                int cbps, int dx, int dy,
-                               AVCodecContext *avctx)
+                               AVCodecContext *avctx, int max_slices)
 {
     int reslevelno, bandno, gbandno = 0, ret, i, j;
     uint32_t csize;
@@ -479,7 +479,8 @@ int ff_jpeg2000_init_component(Jpeg2000Component *comp,
 
     if (ret = ff_jpeg2000_dwt_init(&comp->dwt, comp->coord,
                                    codsty->nreslevels2decode - 1,
-                                   codsty->transform))
+                                   codsty->transform,
+                                   max_slices))
         return ret;
 
     if (av_image_check_size(comp->coord[0][1] - comp->coord[0][0],

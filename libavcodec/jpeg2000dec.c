@@ -1052,7 +1052,7 @@ static int init_tile(Jpeg2000DecoderContext *s, int tileno)
             return AVERROR_INVALIDDATA;
         if (ret = ff_jpeg2000_init_component(comp, codsty, qntsty,
                                              s->cbps[compno], s->cdx[compno],
-                                             s->cdy[compno], s->avctx))
+                                             s->cdy[compno], s->avctx, 1))
             return ret;
     }
     return 0;
