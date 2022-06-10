@@ -1969,26 +1969,26 @@ static int jpeg2000_decode_cb(AVCodecContext *avctx, void *td,
     t1.stride = (1<<codsty->log2_cblk_width) + 2;
     cb->coded = 0;
 
-                        ret = decode_cblk(s, codsty, &t1, cblk,
-                                    cblk->coord[0][1] - cblk->coord[0][0],
-                                    cblk->coord[1][1] - cblk->coord[1][0],
-                                    bandpos, comp->roi_shift);
-                        if (ret)
-                            cb->coded = 1;
-                        else
-                            return 0;
+    ret = decode_cblk(s, codsty, &t1, cblk,
+                cblk->coord[0][1] - cblk->coord[0][0],
+                cblk->coord[1][1] - cblk->coord[1][0],
+                bandpos, comp->roi_shift);
+    if (ret)
+        cb->coded = 1;
+    else
+        return 0;
 
-                        x = cblk->coord[0][0] - band->coord[0][0];
-                        y = cblk->coord[1][0] - band->coord[1][0];
+    x = cblk->coord[0][0] - band->coord[0][0];
+    y = cblk->coord[1][0] - band->coord[1][0];
 
-                        if (comp->roi_shift)
-                            roi_scale_cblk(cblk, comp, &t1);
-                        if (codsty->transform == FF_DWT97)
-                            dequantization_float(x, y, cblk, comp, &t1, band);
-                        else if (codsty->transform == FF_DWT97_INT)
-                            dequantization_int_97(x, y, cblk, comp, &t1, band);
-                        else
-                            dequantization_int(x, y, cblk, comp, &t1, band);
+    if (comp->roi_shift)
+        roi_scale_cblk(cblk, comp, &t1);
+    if (codsty->transform == FF_DWT97)
+        dequantization_float(x, y, cblk, comp, &t1, band);
+    else if (codsty->transform == FF_DWT97_INT)
+        dequantization_int_97(x, y, cblk, comp, &t1, band);
+    else
+        dequantization_int(x, y, cblk, comp, &t1, band);
 
     return 0;
 }
