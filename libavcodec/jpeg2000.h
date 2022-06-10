@@ -280,7 +280,7 @@ int ff_jpeg2000_init_component(Jpeg2000Component *comp,
                                Jpeg2000CodingStyle *codsty,
                                Jpeg2000QuantStyle *qntsty,
                                int cbps, int dx, int dy,
-                               AVCodecContext *ctx);
+                               AVCodecContext *ctx, int max_slices);
 
 void ff_jpeg2000_reinit(Jpeg2000Component *comp, Jpeg2000CodingStyle *codsty);
 

@@ -31,12 +31,12 @@
 
 #define MAX_W 256
 
-static int test_dwt(int *array, int *ref, int border[2][2], int decomp_levels, int type, int max_diff) {
+static int test_dwt(int *array, int *ref, int border[2][2], int decomp_levels, int type, int max_diff, int slices) {
     int ret, j;
     DWTContext s1={{{0}}}, *s= &s1;
     int64_t err2 = 0;
 
-    ret = ff_jpeg2000_dwt_init(s,  border, decomp_levels, type);
+    ret = ff_jpeg2000_dwt_init(s,  border, decomp_levels, type, slices);
     if (ret < 0) {
         fprintf(stderr, "ff_jpeg2000_dwt_init failed\n");
         return 1;
@@ -70,12 +70,12 @@ static int test_dwt(int *array, int *ref, int border[2][2], int decomp_levels, i
     return 0;
 }
 
-static int test_dwtf(float *array, float *ref, int border[2][2], int decomp_levels, float max_diff) {
+static int test_dwtf(float *array, float *ref, int border[2][2], int decomp_levels, float max_diff, int slices) {
     int ret, j;
     DWTContext s1={{{0}}}, *s= &s1;
     double err2 = 0;
 
-    ret = ff_jpeg2000_dwt_init(s,  border, decomp_levels, FF_DWT97);
+    ret = ff_jpeg2000_dwt_init(s,  border, decomp_levels, FF_DWT97, slices);
     if (ret < 0) {
         fprintf(stderr, "ff_jpeg2000_dwt_init failed\n");
         return 1;
@@ -125,19 +125,20 @@ int main(void) {
         arrayf[i] = reff[i] = array[i] = ref[i] =  av_lfg_get(&prng) % 2048;
 
     for (i = 0; i < 100; i++) {
+        int slices = 1 + (i % 10);
         for (j=0; j<4; j++)
             border[j>>1][j&1] = av_lfg_get(&prng) % MAX_W;
         if (border[0][0] >= border[0][1] || border[1][0] >= border[1][1])
             continue;
         decomp_levels = av_lfg_get(&prng) % FF_DWT_MAX_DECLVLS;
 
-        ret = test_dwt(array, ref, border, decomp_levels, FF_DWT53, 0);
+        ret = test_dwt(array, ref, border, decomp_levels, FF_DWT53, 0, slices);
         if (ret)
             return ret;
-        ret = test_dwt(array, ref, border, decomp_levels, FF_DWT97_INT, FFMIN(7+5*decomp_levels, 15+3*decomp_levels));
+        ret = test_dwt(array, ref, border, decomp_levels, FF_DWT97_INT, FFMIN(7+5*decomp_levels, 15+3*decomp_levels), slices);
         if (ret)
             return ret;
-        ret = test_dwtf(arrayf, reff, border, decomp_levels, 0.05);
+        ret = test_dwtf(arrayf, reff, border, decomp_levels, 0.05, slices);
         if (ret)
             return ret;
     }

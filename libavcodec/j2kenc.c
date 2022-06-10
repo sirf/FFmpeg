@@ -494,7 +494,8 @@ static int init_tiles(Jpeg2000EncoderContext *s)
                                                 s->cbps[compno],
                                                 compno?1<<s->chroma_shift[0]:1,
                                                 compno?1<<s->chroma_shift[1]:1,
-                                                s->avctx
+                                                s->avctx,
+                                                1
                                                )) < 0)
                     return ret;
             }
