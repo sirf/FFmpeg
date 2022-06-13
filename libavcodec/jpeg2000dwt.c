@@ -45,7 +45,6 @@
 #define I_LFTG_DELTA   29066ll
 #define I_LFTG_K       80621ll
 #define I_LFTG_X       53274ll
-#define I_PRESHIFT 8
 
 static inline void extend53(int *p, int i0, int i1)
 {
