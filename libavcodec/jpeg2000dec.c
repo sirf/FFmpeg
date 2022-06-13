@@ -150,6 +150,10 @@ typedef struct Jpeg2000DecoderContext {
     unsigned int idwt_size;
     Jpeg2000CodeblockThread *cb;
     unsigned int cb_size;
+
+    // used for idwt slicing
+    int reslevel, dir, slices;
+    int have_dwt97_int; // 1 if any coding style is FF_DWT97_INT
 } Jpeg2000DecoderContext;
 
 /* get_bits functions for JPEG2000 packet bitstream
@@ -541,9 +545,10 @@ static int get_cox(Jpeg2000DecoderContext *s, Jpeg2000CodingStyle *c)
     }
     c->transform = bytestream2_get_byteu(&s->g); // DWT transformation type
     /* set integer 9/7 DWT in case of BITEXACT flag */
-    if ((s->avctx->flags & AV_CODEC_FLAG_BITEXACT) && (c->transform == FF_DWT97))
+    if ((s->avctx->flags & AV_CODEC_FLAG_BITEXACT) && (c->transform == FF_DWT97)) {
         c->transform = FF_DWT97_INT;
-    else if (c->transform == FF_DWT53) {
+        s->have_dwt97_int = 1;
+    } else if (c->transform == FF_DWT53) {
         s->avctx->properties |= FF_CODEC_PROPERTY_LOSSLESS;
     }
 
@@ -1052,7 +1057,7 @@ static int init_tile(Jpeg2000DecoderContext *s, int tileno)
             return AVERROR_INVALIDDATA;
         if (ret = ff_jpeg2000_init_component(comp, codsty, qntsty,
                                              s->cbps[compno], s->cdx[compno],
-                                             s->cdy[compno], s->avctx, 1))
+                                             s->cdy[compno], s->avctx, s->slices))
             return ret;
     }
     return 0;
@@ -1993,19 +1998,74 @@ static int jpeg2000_decode_cb(AVCodecContext *avctx, void *td,
     return 0;
 }
 
+static int jpeg2000_dwt97_int_preshift(AVCodecContext *avctx, void *td,
+                                       int jobnr, int threadnr)
+{
+    Jpeg2000DecoderContext *s   = avctx->priv_data;
+    Jpeg2000IdwtThread *idwt    = s->idwt + jobnr / s->slices;
+    Jpeg2000Tile *tile          = s->tile + jobnr / s->slices / s->ncomponents;
+    int compno                  = (jobnr / s->slices) % s->ncomponents;
+    int slice                   = jobnr % s->slices;
+    Jpeg2000Component *comp     = tile->comp + compno;
+    Jpeg2000CodingStyle *codsty = tile->codsty + compno;
+    int a = comp->dwt.linelen[comp->dwt.ndeclevels - 1][0] *
+            comp->dwt.linelen[comp->dwt.ndeclevels - 1][1];
+    int as = (a + s->slices - 1)/s->slices;
+
+    for (int i = idwt->cb_start; i < idwt->cb_end; i++) {
+        if (s->cb[i].coded) {
+            if (codsty->transform == FF_DWT97_INT) {
+                for (int i = as*slice; i - as < as*slice; i++)
+                    comp->i_data[i] *= 1LL << I_PRESHIFT;
+            }
+            break;
+        }
+    }
+
+    return 0;
+}
+
 static int jpeg2000_idwt(AVCodecContext *avctx, void *td,
                          int jobnr, int threadnr)
 {
     Jpeg2000DecoderContext *s   = avctx->priv_data;
-    Jpeg2000IdwtThread *idwt    = s->idwt + jobnr;
-    Jpeg2000Tile *tile          = s->tile + jobnr / s->ncomponents;
-    int compno                  = jobnr % s->ncomponents;
+    Jpeg2000IdwtThread *idwt    = s->idwt + jobnr / s->slices;
+    Jpeg2000Tile *tile          = s->tile + jobnr / s->slices / s->ncomponents;
+    int compno                  = (jobnr / s->slices) % s->ncomponents;
+    int slice                   = jobnr % s->slices;
     Jpeg2000Component *comp     = tile->comp + compno;
     Jpeg2000CodingStyle *codsty = tile->codsty + compno;
 
     for (int i = idwt->cb_start; i < idwt->cb_end; i++) {
         if (s->cb[i].coded) {
-            ff_dwt_decode(&comp->dwt, codsty->transform == FF_DWT97 ? (void*)comp->f_data : (void*)comp->i_data);
+            ff_dwt_decode_thread(&comp->dwt, codsty->transform == FF_DWT97 ? (void*)comp->f_data : (void*)comp->i_data, s->reslevel, s->dir, slice, s->slices);
+            break;
+        }
+    }
+
+    return 0;
+}
+
+static int jpeg2000_dwt97_int_postshift(AVCodecContext *avctx, void *td,
+                                        int jobnr, int threadnr)
+{
+    Jpeg2000DecoderContext *s   = avctx->priv_data;
+    Jpeg2000IdwtThread *idwt    = s->idwt + jobnr / s->slices;
+    Jpeg2000Tile *tile          = s->tile + jobnr / s->slices / s->ncomponents;
+    int compno                  = (jobnr / s->slices) % s->ncomponents;
+    int slice                   = jobnr % s->slices;
+    Jpeg2000Component *comp     = tile->comp + compno;
+    Jpeg2000CodingStyle *codsty = tile->codsty + compno;
+    int a = comp->dwt.linelen[comp->dwt.ndeclevels - 1][0] *
+            comp->dwt.linelen[comp->dwt.ndeclevels - 1][1];
+    int as = (a + s->slices - 1)/s->slices;
+
+    for (int i = idwt->cb_start; i < idwt->cb_end; i++) {
+        if (s->cb[i].coded) {
+            if (codsty->transform == FF_DWT97_INT) {
+                for (int i = as*slice; i - as < as*slice; i++)
+                    comp->i_data[i] = (comp->i_data[i] + ((1LL<<I_PRESHIFT)>>1)) >> I_PRESHIFT;
+            }
             break;
         }
     }
@@ -2476,7 +2536,7 @@ static av_cold int jpeg2000_decode_init(AVCodecContext *avctx)
     return 0;
 }
 
-static int jpeg2000_setup_cbs(Jpeg2000DecoderContext *s, int *cbs_out)
+static int jpeg2000_setup_cbs(Jpeg2000DecoderContext *s, int *cbs_out, int *maxreslevels_out)
 {
     if (s->numXtiles * s->numYtiles > INT_MAX/sizeof(*s->idwt)/s->ncomponents)
         return AVERROR(ENOMEM);
@@ -2486,7 +2546,7 @@ static int jpeg2000_setup_cbs(Jpeg2000DecoderContext *s, int *cbs_out)
         return AVERROR(ENOMEM);
 
     for (int pass = 0; pass < 2; pass++) {
-        int cbs = 0;
+        int cbs = 0, maxreslevels = 0;
         for (int tileno = 0; tileno < s->numXtiles * s->numYtiles; tileno++) {
             for (int compno = 0; compno < s->ncomponents; compno++) {
                 Jpeg2000Tile *tile          = s->tile + tileno;
@@ -2495,6 +2555,7 @@ static int jpeg2000_setup_cbs(Jpeg2000DecoderContext *s, int *cbs_out)
                 Jpeg2000IdwtThread *idwt    = s->idwt + compno + tileno * s->ncomponents;
 
                 idwt->cb_start = cbs;
+                maxreslevels = FFMAX(maxreslevels, codsty->nreslevels2decode);
 
                 for (int reslevelno = 0; reslevelno < codsty->nreslevels2decode; reslevelno++) {
                     Jpeg2000ResLevel *rlevel = comp->reslevel + reslevelno;
@@ -2541,6 +2602,7 @@ static int jpeg2000_setup_cbs(Jpeg2000DecoderContext *s, int *cbs_out)
         }
 
         *cbs_out = cbs;
+        *maxreslevels_out = maxreslevels;
     }
     return 0;
 }
@@ -2549,7 +2611,7 @@ static int jpeg2000_decode_frame(AVCodecContext *avctx, AVFrame *picture,
                                  int *got_frame, AVPacket *avpkt)
 {
     Jpeg2000DecoderContext *s = avctx->priv_data;
-    int ret, cbs;
+    int ret, cbs, maxreslevels;
 
     s->avctx     = avctx;
     bytestream2_init(&s->g, avpkt->data, avpkt->size);
@@ -2592,6 +2654,7 @@ static int jpeg2000_decode_frame(AVCodecContext *avctx, AVFrame *picture,
         goto end;
     picture->pict_type = AV_PICTURE_TYPE_I;
     picture->key_frame = 1;
+    s->slices = avctx->active_thread_type == FF_THREAD_SLICE ? avctx->thread_count : 1;
 
     if (ret = jpeg2000_read_bitstream_packets(s))
         goto end;
@@ -2607,11 +2670,23 @@ static int jpeg2000_decode_frame(AVCodecContext *avctx, AVFrame *picture,
         }
     }
 
-    if ((ret = jpeg2000_setup_cbs(s, &cbs)))
+    if ((ret = jpeg2000_setup_cbs(s, &cbs, &maxreslevels)))
         goto end;
 
     avctx->execute2(avctx, jpeg2000_decode_cb, NULL, NULL, cbs);
-    avctx->execute2(avctx, jpeg2000_idwt, NULL, NULL, s->numXtiles * s->numYtiles * s->ncomponents);
+
+    if (s->have_dwt97_int)
+        avctx->execute2(avctx, jpeg2000_dwt97_int_preshift, NULL, NULL, s->numXtiles * s->numYtiles * s->ncomponents * s->slices);
+
+    for (s->reslevel = 0; s->reslevel < maxreslevels; s->reslevel++) {
+        for (s->dir = 0; s->dir < 2; s->dir++) {
+            avctx->execute2(avctx, jpeg2000_idwt, NULL, NULL, s->numXtiles * s->numYtiles * s->ncomponents * s->slices);
+        }
+    }
+
+    if (s->have_dwt97_int)
+        avctx->execute2(avctx, jpeg2000_dwt97_int_postshift, NULL, NULL, s->numXtiles * s->numYtiles * s->ncomponents * s->slices);
+
     avctx->execute2(avctx, jpeg2000_mct_write_frame, picture, NULL, s->numXtiles * s->numYtiles);
 
     jpeg2000_dec_cleanup(s);
