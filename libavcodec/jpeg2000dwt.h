@@ -48,7 +48,9 @@ typedef struct DWTContext {
     uint8_t ndeclevels;                  ///< number of decomposition levels
     uint8_t type;                        ///< 0 for 9/7; 1 for 5/3
     int32_t *i_linebuf;                  ///< int buffer used by transform
+    unsigned int i_linebuf_size;
     float   *f_linebuf;                  ///< float buffer used by transform
+    unsigned int f_linebuf_size;
     int max_slices;
     int linesize;
 } DWTContext;
