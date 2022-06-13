@@ -79,6 +79,7 @@ typedef struct Jpeg2000TilePart {
  * one per component, so tile_part elements have a size of 3 */
 typedef struct Jpeg2000Tile {
     Jpeg2000Component   *comp;
+    unsigned int        comp_size;
     uint8_t             properties[4];
     Jpeg2000CodingStyle codsty[4];
     Jpeg2000QuantStyle  qntsty[4];
@@ -141,6 +142,7 @@ typedef struct Jpeg2000DecoderContext {
     int             curtileno;
 
     Jpeg2000Tile    *tile;
+    unsigned int    tile_size;
     Jpeg2000DSPContext dsp;
 
     /*options parameters*/
@@ -380,8 +382,7 @@ static int get_siz(Jpeg2000DecoderContext *s)
         return AVERROR(EINVAL);
     }
 
-    s->tile = av_calloc(s->numXtiles * s->numYtiles, sizeof(*s->tile));
-    if (!s->tile) {
+    if (ff_fast_recalloc(&s->tile, &s->tile_size, s->numXtiles * s->numYtiles, sizeof(*s->tile))) {
         s->numXtiles = s->numYtiles = 0;
         return AVERROR(ENOMEM);
     }
@@ -389,8 +390,7 @@ static int get_siz(Jpeg2000DecoderContext *s)
     for (i = 0; i < s->numXtiles * s->numYtiles; i++) {
         Jpeg2000Tile *tile = s->tile + i;
 
-        tile->comp = av_mallocz(s->ncomponents * sizeof(*tile->comp));
-        if (!tile->comp)
+        if (ff_fast_recalloc(&tile->comp, &tile->comp_size, s->ncomponents, sizeof(*tile->comp)))
             return AVERROR(ENOMEM);
     }
 
@@ -1196,9 +1196,7 @@ static int jpeg2000_decode_packet(Jpeg2000DecoderContext *s, Jpeg2000Tile *tile,
 
             cblk->nb_lengthinc = 0;
             cblk->nb_terminationsinc = 0;
-            av_free(cblk->lengthinc);
-            cblk->lengthinc = av_calloc(newpasses, sizeof(*cblk->lengthinc));
-            if (!cblk->lengthinc)
+            if (ff_fast_recalloc(&cblk->lengthinc, &cblk->lengthinc_size, newpasses, sizeof(*cblk->lengthinc)))
                 return AVERROR(ENOMEM);
             tmp = av_realloc_array(cblk->data_start, cblk->nb_terminations + newpasses + 1, sizeof(*cblk->data_start));
             if (!tmp)
@@ -1292,7 +1290,6 @@ static int jpeg2000_decode_packet(Jpeg2000DecoderContext *s, Jpeg2000Tile *tile,
                     cblk->data_start[cblk->nb_terminations] = cblk->length;
                 }
             }
-            av_freep(&cblk->lengthinc);
         }
     }
     // Save state of stream
@@ -2166,12 +2163,13 @@ static int jpeg2000_mct_write_frame(AVCodecContext *avctx, void *td,
     return 0;
 }
 
-static void jpeg2000_dec_cleanup(Jpeg2000DecoderContext *s)
+static void jpeg2000_dec_cleanup(Jpeg2000DecoderContext *s, int close)
 {
     int tileno, compno;
-    for (tileno = 0; tileno < s->numXtiles * s->numYtiles; tileno++) {
+    if (close) {
+    for (tileno = 0; tileno < s->tile_size/sizeof(*s->tile); tileno++) {
         if (s->tile[tileno].comp) {
-            for (compno = 0; compno < s->ncomponents; compno++) {
+            for (compno = 0; compno < s->tile[tileno].comp_size/sizeof(*s->tile[tileno].comp); compno++) {
                 Jpeg2000Component *comp     = s->tile[tileno].comp   + compno;
                 Jpeg2000CodingStyle *codsty = s->tile[tileno].codsty + compno;
 
@@ -2182,10 +2180,11 @@ static void jpeg2000_dec_cleanup(Jpeg2000DecoderContext *s)
             s->tile[tileno].packed_headers_size = 0;
         }
     }
+    av_freep(&s->tile);
+    }
     av_freep(&s->packed_headers);
     s->packed_headers_size = 0;
     memset(&s->packed_headers_stream, 0, sizeof(s->packed_headers_stream));
-    av_freep(&s->tile);
     memset(s->codsty, 0, sizeof(s->codsty));
     memset(s->qntsty, 0, sizeof(s->qntsty));
     memset(s->properties, 0, sizeof(s->properties));
@@ -2689,7 +2688,7 @@ static int jpeg2000_decode_frame(AVCodecContext *avctx, AVFrame *picture,
 
     avctx->execute2(avctx, jpeg2000_mct_write_frame, picture, NULL, s->numXtiles * s->numYtiles);
 
-    jpeg2000_dec_cleanup(s);
+    jpeg2000_dec_cleanup(s, 0);
 
     *got_frame = 1;
 
@@ -2702,7 +2701,7 @@ static int jpeg2000_decode_frame(AVCodecContext *avctx, AVFrame *picture,
     return bytestream2_tell(&s->g);
 
 end:
-    jpeg2000_dec_cleanup(s);
+    jpeg2000_dec_cleanup(s, 0);
     return ret;
 }
 
@@ -2712,6 +2711,7 @@ static av_cold int jpeg2000_decode_close(AVCodecContext *avctx)
 
     av_freep(&s->idwt);
     av_freep(&s->cb);
+    jpeg2000_dec_cleanup(s, 1);
 
     return 0;
 }

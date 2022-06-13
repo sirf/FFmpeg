@@ -531,6 +531,7 @@ int ff_jpeg2000_dwt_init(DWTContext *s, int border[2][2],
 {
     int i, j, lev = decomp_levels,
         b[2][2];
+    size_t prod;
 
     s->ndeclevels = decomp_levels;
     s->type       = type;
@@ -556,11 +557,15 @@ int ff_jpeg2000_dwt_init(DWTContext *s, int border[2][2],
         }
 
     if (type == FF_DWT97) {
-        s->f_linebuf = av_malloc_array(s->linesize, s->max_slices*sizeof(*s->f_linebuf));
+        if (av_size_mult(s->linesize, s->max_slices*sizeof(*s->f_linebuf), &prod))
+            return AVERROR(ENOMEM);
+        av_fast_malloc(&s->f_linebuf, &s->f_linebuf_size, prod);
         if (!s->f_linebuf)
             return AVERROR(ENOMEM);
     } else {
-        s->i_linebuf = av_malloc_array(s->linesize, s->max_slices*sizeof(*s->i_linebuf));
+        if (av_size_mult(s->linesize, s->max_slices*sizeof(*s->i_linebuf), &prod))
+            return AVERROR(ENOMEM);
+        av_fast_malloc(&s->i_linebuf, &s->i_linebuf_size, prod);
         if (!s->i_linebuf)
             return AVERROR(ENOMEM);
     }
