@@ -502,7 +502,30 @@ void av_memcpy_backptr(uint8_t *dst, int back, int cnt)
     }
 }
 
-void *av_fast_realloc(void *ptr, unsigned int *size, size_t min_size)
+//@ lemma floor_mod:   \forall integer x, y; x >= 0 && y >= 1 ==> ((x / y) * y) % y == 0;
+//@ lemma floor_range: \forall integer x, y, z; x >= 0 && y >= 1 && z >= 0 && x <= z ==> (x / y) * y <= (z / y) * y;
+
+/*@
+    requires min_size <= max_size && elsize >= 1 && min_size % elsize == 0;
+    ensures mod:   \result % elsize == 0;
+    ensures range: min_size <= \result <= max_size;
+    assigns \nothing;
+ */
+static size_t compute_size(size_t min_size, size_t max_size, size_t elsize)
+{
+    size_t extra = min_size / 16 + 32;
+
+    // avoid unsigned overflow
+    if (min_size > SIZE_MAX - extra)
+        min_size = SIZE_MAX;
+    else
+        min_size = min_size + extra;
+
+    min_size = FFMIN(max_size, min_size);
+    return (min_size / elsize) * elsize;
+}
+
+static void *realloc_inner(void *ptr, unsigned int *size, size_t min_size, size_t elsize)
 {
     size_t max_size;
 
@@ -518,7 +541,7 @@ void *av_fast_realloc(void *ptr, unsigned int *size, size_t min_size)
         return NULL;
     }
 
-    min_size = FFMIN(max_size, FFMAX(min_size + min_size / 16 + 32, min_size));
+    min_size = compute_size(min_size, max_size, elsize);
 
     ptr = av_realloc(ptr, min_size);
     /* we could set this to the unmodified min_size but this is safer
@@ -530,6 +553,35 @@ void *av_fast_realloc(void *ptr, unsigned int *size, size_t min_size)
     *size = min_size;
 
     return ptr;
+}
+
+void *av_fast_realloc(void *ptr, unsigned int *size, size_t min_size)
+{
+    return realloc_inner(ptr, size, min_size, 1);
+}
+
+int av_fast_recalloc(void *ptr, unsigned int *size, size_t nelem, size_t elsize)
+{
+    void *val;
+    void *new_ptr;
+    unsigned int new_size = *size;
+    size_t product;
+    int ret;
+    memcpy(&val, ptr, sizeof(val));
+
+    if ((ret = av_size_mult(nelem, elsize, &product)) < 0)
+        return ret;
+
+    if (!(new_ptr = realloc_inner(val, &new_size, product, elsize)))
+        return AVERROR(ENOMEM);
+
+    if (new_size > *size) {
+        memset((uint8_t*)new_ptr + *size, 0, new_size - *size);
+        *size = new_size;
+        memcpy(ptr, &new_ptr, sizeof(new_ptr));
+    }
+
+    return 0;
 }
 
 static inline void fast_malloc(void *ptr, unsigned int *size, size_t min_size, int zero_realloc)
