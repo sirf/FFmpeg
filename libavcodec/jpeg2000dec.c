@@ -156,6 +156,7 @@ typedef struct Jpeg2000DecoderContext {
     // used for idwt slicing
     int reslevel, dir, slices;
     int have_dwt97_int; // 1 if any coding style is FF_DWT97_INT
+    int have_mct;
 } Jpeg2000DecoderContext;
 
 /* get_bits functions for JPEG2000 packet bitstream
@@ -599,6 +600,9 @@ static int get_cod(Jpeg2000DecoderContext *s, Jpeg2000CodingStyle *c,
                tmp.mct, s->ncomponents);
         return AVERROR_INVALIDDATA;
     }
+
+    if (tmp.mct)
+        s->have_mct = 1;
 
     if ((ret = get_cox(s, &tmp)) < 0)
         return ret;
@@ -2073,16 +2077,14 @@ static int jpeg2000_dwt97_int_postshift(AVCodecContext *avctx, void *td,
 
 #define WRITE_FRAME(D, PIXEL)                                                                     \
     static inline void write_frame_ ## D(Jpeg2000DecoderContext * s, Jpeg2000Tile * tile,         \
-                                         AVFrame * picture, int precision)                        \
+                                         AVFrame * picture, int precision, int compno)            \
     {                                                                                             \
         const AVPixFmtDescriptor *pixdesc = av_pix_fmt_desc_get(s->avctx->pix_fmt);               \
         int planar    = !!(pixdesc->flags & AV_PIX_FMT_FLAG_PLANAR);                              \
         int pixelsize = planar ? 1 : pixdesc->nb_components;                                      \
                                                                                                   \
-        int compno;                                                                               \
         int x, y;                                                                                 \
                                                                                                   \
-        for (compno = 0; compno < s->ncomponents; compno++) {                                     \
             Jpeg2000Component *comp     = tile->comp + compno;                                    \
             Jpeg2000CodingStyle *codsty = tile->codsty + compno;                                  \
             PIXEL *line;                                                                          \
@@ -2129,8 +2131,6 @@ static int jpeg2000_dwt97_int_postshift(AVCodecContext *avctx, void *td,
                 }                                                                                 \
                 line += picture->linesize[plane] / sizeof(PIXEL);                                 \
             }                                                                                     \
-        }                                                                                         \
-                                                                                                  \
     }
 
 WRITE_FRAME(8, uint8_t)
@@ -2138,26 +2138,36 @@ WRITE_FRAME(16, uint16_t)
 
 #undef WRITE_FRAME
 
-static int jpeg2000_mct_write_frame(AVCodecContext *avctx, void *td,
-                                    int jobnr, int threadnr)
+static int jpeg2000_mct(AVCodecContext *avctx, void *td,
+                        int jobnr, int threadnr)
 {
     Jpeg2000DecoderContext *s = avctx->priv_data;
-    AVFrame *picture = td;
     Jpeg2000Tile *tile = s->tile + jobnr;
 
     /* inverse MCT transformation */
     if (tile->codsty[0].mct)
         mct_decode(s, tile);
 
+    return 0;
+}
+
+static int jpeg2000_write_frame(AVCodecContext *avctx, void *td,
+                                int jobnr, int threadnr)
+{
+    Jpeg2000DecoderContext *s = avctx->priv_data;
+    AVFrame *picture = td;
+    Jpeg2000Tile *tile = s->tile + jobnr / s->ncomponents;
+    int compno = jobnr % s->ncomponents;
+
     if (s->precision <= 8) {
-        write_frame_8(s, tile, picture, 8);
+        write_frame_8(s, tile, picture, 8, compno);
     } else {
         int precision = picture->format == AV_PIX_FMT_XYZ12 ||
                         picture->format == AV_PIX_FMT_RGB48 ||
                         picture->format == AV_PIX_FMT_RGBA64 ||
                         picture->format == AV_PIX_FMT_GRAY16 ? 16 : s->precision;
 
-        write_frame_16(s, tile, picture, precision);
+        write_frame_16(s, tile, picture, precision, compno);
     }
 
     return 0;
@@ -2695,7 +2705,10 @@ static int jpeg2000_decode_frame(AVCodecContext *avctx, AVFrame *picture,
     if (s->have_dwt97_int)
         avctx->execute2(avctx, jpeg2000_dwt97_int_postshift, NULL, NULL, s->numXtiles * s->numYtiles * s->ncomponents * s->slices);
 
-    avctx->execute2(avctx, jpeg2000_mct_write_frame, picture, NULL, s->numXtiles * s->numYtiles);
+    if (s->have_mct)
+        avctx->execute2(avctx, jpeg2000_mct, NULL, NULL, s->numXtiles * s->numYtiles);
+
+    avctx->execute2(avctx, jpeg2000_write_frame, picture, NULL, s->numXtiles * s->numYtiles * s->ncomponents);
 
     jpeg2000_dec_cleanup(s, 0);
 
