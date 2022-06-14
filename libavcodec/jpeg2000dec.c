@@ -2668,9 +2668,19 @@ static int jpeg2000_decode_frame(AVCodecContext *avctx, AVFrame *picture,
 
     for (s->reslevel = 0; s->reslevel < maxreslevels; s->reslevel++) {
         for (s->dir = 0; s->dir < 2; s->dir++) {
+            int before = s->slices;
+            int div = s->slices >= 96 ? 7 : 5;
+
+            if (s->reslevel < div) {
+                int halve = 1<<(div - s->reslevel + (s->slices >= 96 ? 0 : 1 - s->dir));
+                s->slices = (s->slices + halve-1)/halve;
+            }
+
             if ((ret = avctx->execute2(avctx, jpeg2000_idwt, NULL, NULL,
                     s->numXtiles * s->numYtiles * s->ncomponents * s->slices)) < 0)
                 goto end;
+
+            s->slices = before;
         }
     }
 
