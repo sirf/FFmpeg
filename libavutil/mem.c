@@ -530,6 +530,30 @@ void *av_fast_realloc(void *ptr, unsigned int *size, size_t min_size)
     return ptr;
 }
 
+int ff_fast_recalloc(void *ptr, unsigned int *size, size_t nelem, size_t elsize)
+{
+    void *val;
+    void *new_ptr;
+    unsigned int new_size = *size;
+    size_t product;
+    int ret;
+    memcpy(&val, ptr, sizeof(val));
+
+    if ((ret = av_size_mult(nelem, elsize, &product)) < 0)
+        return ret;
+
+    if (!(new_ptr = av_fast_realloc(val, &new_size, product)))
+        return AVERROR(ENOMEM);
+
+    if (new_size > *size) {
+        memset((uint8_t*)new_ptr + *size, 0, new_size - *size);
+        *size = new_size;
+        memcpy(ptr, &new_ptr, sizeof(new_ptr));
+    }
+
+    return 0;
+}
+
 static inline void fast_malloc(void *ptr, unsigned int *size, size_t min_size, int zero_realloc)
 {
     size_t max_size;

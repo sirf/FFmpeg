@@ -381,6 +381,61 @@ int av_reallocp_array(void *ptr, size_t nmemb, size_t size);
 void *av_fast_realloc(void *ptr, unsigned int *size, size_t min_size);
 
 /**
+ * Reallocate the pointed-to buffer if it is not large enough, otherwise do
+ * nothing. Old data is memcpy()'d to the start of the new buffer. The newly
+ * allocated space at the end of the buffer is zero-initialized. In other
+ * words the buffer is expanded with zeroes when necessary.
+ *
+ * If the pointed-to buffer is `NULL`, then a new zero-initialized buffer is
+ * allocated.
+ *
+ * If the pointed-to buffer is not large enough, and reallocation fails,
+ * `AVERROR(ENOMEM)` is returned.
+ *
+ * If nelem*elsize is too large then `AVERROR(EINVAL)` is returned.
+ *
+ * Contrary to av_fast_malloc(), *ptr and *size are not touched in case of
+ * error, to allow for proper cleanup.
+ *
+ * *ptr is not guaranteed to be an exact multiple of elsize bytes.
+ *
+ * This function is intended for use with arrays of structures that contain
+ * pointers that are allowed to grow and typically don't shrink.
+ *
+ * A typical use pattern follows:
+ *
+ * @code{.c}
+ * int foo_work(SomeContext *s) {
+ *     if (ff_fast_recalloc(&s->foo, &s->foo_size, s->nfoo, sizeof(Foo)))
+ *         return AVERROR(ENOMEM);
+ *     for (x = 0; x < s->nfoo; x++)
+ *         do stuff with s->foo[x]
+ *     return 0;
+ * }
+ *
+ * void foo_close(SomeContext *s) {
+ *     // note the use of s->foo_size, not s->nfoo
+ *     for (x = 0; x < s->foo_size/sizeof(Foo); x++)
+ *         av_freep(&s->foo[x].bar);
+ *     av_freep(&s->foo);
+ * }
+ * @endcode
+ *
+ * @param[in,out] ptr      Pointer to pointer to an already allocated buffer.
+ *                         `*ptr` will be overwritten with pointer to new
+ *                         buffer on success and will be left alone on failure
+ * @param[in,out] size     Pointer to the size of buffer `*ptr`. `*size` is
+ *                         updated to the new allocated size and will be left
+ *                         along on failure.
+ * @param[in]     nelem    Number of desired elements in *ptr
+ * @param[in]     elsize   Size of each element in *ptr
+ * @return Zero on success, <0 on error.
+ * @see av_fast_realloc()
+ * @see av_fast_malloc()
+ */
+int ff_fast_recalloc(void *ptr, unsigned int *size, size_t nelem, size_t elsize);
+
+/**
  * Allocate a buffer, reusing the given one if large enough.
  *
  * Contrary to av_fast_realloc(), the current buffer contents might not be
