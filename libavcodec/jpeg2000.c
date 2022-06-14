@@ -247,7 +247,7 @@ static void init_band_stepsize(AVCodecContext *avctx,
                                Jpeg2000CodingStyle *codsty,
                                Jpeg2000QuantStyle *qntsty,
                                int bandno, int gbandno, int reslevelno,
-                               int cbps)
+                               int cbps, int is_enc)
 {
     /* TODO: Implementation of quantization step not finished,
      * see ISO/IEC 15444-1:2002 E.1 and A.6.4. */
@@ -305,7 +305,7 @@ static void init_band_stepsize(AVCodecContext *avctx,
 
     /* FIXME: In OpenJPEG code stepsize = stepsize * 0.5. Why?
      * If not set output of entropic decoder is not correct. */
-    if (!av_codec_is_encoder(avctx->codec))
+    if (!is_enc)
         band->f_stepsize *= 0.5;
 }
 
@@ -316,7 +316,8 @@ static int init_prec(AVCodecContext *avctx,
                      Jpeg2000CodingStyle *codsty,
                      int precno, int bandno, int reslevelno,
                      int log2_band_prec_width,
-                     int log2_band_prec_height)
+                     int log2_band_prec_height,
+                     int is_enc)
 {
     Jpeg2000Prec *prec = band->prec + precno;
     int nb_codeblocks, cblkno;
@@ -413,7 +414,7 @@ static int init_prec(AVCodecContext *avctx,
         cblk->lblock    = 3;
         cblk->length    = 0;
         cblk->npasses   = 0;
-        if (av_codec_is_encoder(avctx->codec)) {
+        if (is_enc) {
             av_freep(&cblk->layers);
             cblk->layers = av_calloc(codsty->nlayers, sizeof(*cblk->layers));
             if (!cblk->layers)
@@ -430,7 +431,7 @@ static int init_band(AVCodecContext *avctx,
                      Jpeg2000CodingStyle *codsty,
                      Jpeg2000QuantStyle *qntsty,
                      int bandno, int gbandno, int reslevelno,
-                     int cbps, int dx, int dy)
+                     int cbps, int dx, int dy, int is_enc)
 {
     Jpeg2000Band *band = reslevel->band + bandno;
     uint8_t log2_band_prec_width, log2_band_prec_height;
@@ -439,7 +440,7 @@ static int init_band(AVCodecContext *avctx,
     int nb_precincts;
     int i, j, ret;
 
-    init_band_stepsize(avctx, band, codsty, qntsty, bandno, gbandno, reslevelno, cbps);
+    init_band_stepsize(avctx, band, codsty, qntsty, bandno, gbandno, reslevelno, cbps, is_enc);
 
     /* computation of tbx_0, tbx_1, tby_0, tby_1
      * see ISO/IEC 15444-1:2002 B.5 eq. B-15 and tbl B.1
@@ -493,7 +494,8 @@ static int init_band(AVCodecContext *avctx,
     for (precno = 0; precno < nb_precincts; precno++) {
         ret = init_prec(avctx, band, reslevel, comp, codsty,
                         precno, bandno, reslevelno,
-                        log2_band_prec_width, log2_band_prec_height);
+                        log2_band_prec_width, log2_band_prec_height,
+                        is_enc);
         if (ret < 0)
             return ret;
     }
@@ -510,6 +512,7 @@ int ff_jpeg2000_init_component(Jpeg2000Component *comp,
     int reslevelno, bandno, gbandno = 0, ret, i, j;
     uint32_t csize;
     size_t prod;
+    int is_enc = av_codec_is_encoder(avctx->codec);
 
     if (codsty->nreslevels2decode <= 0) {
         av_log(avctx, AV_LOG_ERROR, "nreslevels2decode %d invalid or uninitialized\n", codsty->nreslevels2decode);
@@ -607,7 +610,7 @@ int ff_jpeg2000_init_component(Jpeg2000Component *comp,
             ret = init_band(avctx, reslevel,
                             comp, codsty, qntsty,
                             bandno, gbandno, reslevelno,
-                            cbps, dx, dy);
+                            cbps, dx, dy, is_enc);
             if (ret < 0)
                 return ret;
         }
