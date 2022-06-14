@@ -93,34 +93,34 @@ static int ff_jpeg2000_tag_tree_init(Jpeg2000TgtNode **old, unsigned int *size, 
         }
         return 0;
     } else {
-    tt_size = tag_tree_size(w, h);
+        tt_size = tag_tree_size(w, h);
 
-    if (av_size_mult(tt_size, sizeof(*t), &prod))
-        return AVERROR(ENOMEM);
+        if (av_size_mult(tt_size, sizeof(*t), &prod))
+            return AVERROR(ENOMEM);
 
-    av_fast_malloc(old, size, prod);
-    if (!*old)
-        return AVERROR(ENOMEM);
-    t = *old;
-    memset(*old, 0, prod);
+        av_fast_malloc(old, size, prod);
+        if (!*old)
+            return AVERROR(ENOMEM);
+        t = *old;
+        memset(*old, 0, prod);
 
-    while (w > 1 || h > 1) {
-        int i, j;
-        pw = w;
-        ph = h;
+        while (w > 1 || h > 1) {
+            int i, j;
+            pw = w;
+            ph = h;
 
-        w  = (w + 1) >> 1;
-        h  = (h + 1) >> 1;
-        ofs += pw * ph;
+            w  = (w + 1) >> 1;
+            h  = (h + 1) >> 1;
+            ofs += pw * ph;
 
-        for (i = 0; i < ph; i++)
-            for (j = 0; j < pw; j++)
-                t[i * pw + j].parent = (i >> 1) * w + (j >> 1) + ofs;
+            for (i = 0; i < ph; i++)
+                for (j = 0; j < pw; j++)
+                    t[i * pw + j].parent = (i >> 1) * w + (j >> 1) + ofs;
 
-        t += pw * ph;
-    }
-    t[0].parent = -1;
-    return 0;
+            t += pw * ph;
+        }
+        t[0].parent = -1;
+        return 0;
     }
 }
 
