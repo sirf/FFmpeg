@@ -61,13 +61,13 @@ typedef struct SliceThreadContext {
     Progress *progress;
 } SliceThreadContext;
 
-static void main_function(void *priv) {
+static int main_function(void *priv) {
     AVCodecContext *avctx = priv;
     SliceThreadContext *c = avctx->internal->thread_ctx;
-    c->mainfunc(avctx);
+    return c->mainfunc(avctx);
 }
 
-static void worker_func(void *priv, int jobnr, int threadnr, int nb_jobs, int nb_threads)
+static int worker_func(void *priv, int jobnr, int threadnr, int nb_jobs, int nb_threads)
 {
     AVCodecContext *avctx = priv;
     SliceThreadContext *c = avctx->internal->thread_ctx;
@@ -77,6 +77,7 @@ static void worker_func(void *priv, int jobnr, int threadnr, int nb_jobs, int nb
                   : c->func2(avctx, c->args, jobnr, threadnr);
     if (c->rets)
         c->rets[jobnr] = ret;
+    return ret;
 }
 
 void ff_slice_thread_free(AVCodecContext *avctx)
@@ -112,8 +113,7 @@ static int thread_execute(AVCodecContext *avctx, action_func* func, void *arg, i
     c->func = func;
     c->rets = ret;
 
-    avpriv_slicethread_execute(c->thread, job_count, !!c->mainfunc  );
-    return 0;
+    return avpriv_slicethread_execute(c->thread, job_count, !!c->mainfunc  );
 }
 
 static int thread_execute2(AVCodecContext *avctx, action_func2* func2, void *arg, int *ret, int job_count)
@@ -135,7 +135,7 @@ int ff_slice_thread_init(AVCodecContext *avctx)
 {
     SliceThreadContext *c;
     int thread_count = avctx->thread_count;
-    void (*mainfunc)(void *);
+    int (*mainfunc)(void *);
 
     // We cannot do this in the encoder init as the threads are created before
     if (av_codec_is_encoder(avctx->codec) &&

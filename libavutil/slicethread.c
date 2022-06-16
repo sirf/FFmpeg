@@ -34,6 +34,7 @@ typedef struct WorkerContext {
     pthread_cond_t  cond;
     pthread_t       thread;
     int             done;
+    int             ret;
 } WorkerContext;
 
 struct AVSliceThread {
@@ -50,11 +51,11 @@ struct AVSliceThread {
     int             finished;
 
     void            *priv;
-    void            (*worker_func)(void *priv, int jobnr, int threadnr, int nb_jobs, int nb_threads);
-    void            (*main_func)(void *priv);
+    int             (*worker_func)(void *priv, int jobnr, int threadnr, int nb_jobs, int nb_threads);
+    int             (*main_func)(void *priv);
 };
 
-static int run_jobs(AVSliceThread *ctx)
+static int run_jobs(AVSliceThread *ctx, int *ret_out)
 {
     unsigned nb_jobs    = ctx->nb_jobs;
     unsigned nb_active_threads = ctx->nb_active_threads;
@@ -62,7 +63,8 @@ static int run_jobs(AVSliceThread *ctx)
     unsigned current_job  = first_job;
 
     do {
-        ctx->worker_func(ctx->priv, current_job, first_job, nb_jobs, nb_active_threads);
+        int ret = ctx->worker_func(ctx->priv, current_job, first_job, nb_jobs, nb_active_threads);
+        *ret_out = FFMIN(*ret_out, ret);
     } while ((current_job = atomic_fetch_add_explicit(&ctx->current_job, 1, memory_order_acq_rel)) < nb_jobs);
 
     return current_job == nb_jobs + nb_active_threads - 1;
@@ -86,7 +88,7 @@ static void *attribute_align_arg thread_worker(void *v)
             return NULL;
         }
 
-        if (run_jobs(ctx)) {
+        if (run_jobs(ctx, &w->ret)) {
             pthread_mutex_lock(&ctx->done_mutex);
             ctx->done = 1;
             pthread_cond_signal(&ctx->done_cond);
@@ -96,8 +98,8 @@ static void *attribute_align_arg thread_worker(void *v)
 }
 
 int avpriv_slicethread_create(AVSliceThread **pctx, void *priv,
-                              void (*worker_func)(void *priv, int jobnr, int threadnr, int nb_jobs, int nb_threads),
-                              void (*main_func)(void *priv),
+                              int (*worker_func)(void *priv, int jobnr, int threadnr, int nb_jobs, int nb_threads),
+                              int (*main_func)(void *priv),
                               int nb_threads)
 {
     AVSliceThread *ctx;
@@ -165,9 +167,9 @@ int avpriv_slicethread_create(AVSliceThread **pctx, void *priv,
     return nb_threads;
 }
 
-void avpriv_slicethread_execute(AVSliceThread *ctx, int nb_jobs, int execute_main)
+int avpriv_slicethread_execute(AVSliceThread *ctx, int nb_jobs, int execute_main)
 {
-    int nb_workers, i, is_last = 0;
+    int nb_workers, i, is_last = 0, ret = 0;
 
     av_assert0(nb_jobs > 0);
     ctx->nb_jobs           = nb_jobs;
@@ -182,14 +184,15 @@ void avpriv_slicethread_execute(AVSliceThread *ctx, int nb_jobs, int execute_mai
         WorkerContext *w = &ctx->workers[i];
         pthread_mutex_lock(&w->mutex);
         w->done = 0;
+        w->ret = 0;
         pthread_cond_signal(&w->cond);
         pthread_mutex_unlock(&w->mutex);
     }
 
     if (ctx->main_func && execute_main)
-        ctx->main_func(ctx->priv);
+        ret = ctx->main_func(ctx->priv);
     else
-        is_last = run_jobs(ctx);
+        is_last = run_jobs(ctx, &ret);
 
     if (!is_last) {
         pthread_mutex_lock(&ctx->done_mutex);
@@ -198,6 +201,11 @@ void avpriv_slicethread_execute(AVSliceThread *ctx, int nb_jobs, int execute_mai
         ctx->done = 0;
         pthread_mutex_unlock(&ctx->done_mutex);
     }
+
+    for (i = 0; i < nb_workers; i++)
+        ret = FFMIN(ret, ctx->workers[i].ret);
+
+    return ret;
 }
 
 void avpriv_slicethread_free(AVSliceThread **pctx)
@@ -238,17 +246,18 @@ void avpriv_slicethread_free(AVSliceThread **pctx)
 #else /* HAVE_PTHREADS || HAVE_W32THREADS || HAVE_OS32THREADS */
 
 int avpriv_slicethread_create(AVSliceThread **pctx, void *priv,
-                              void (*worker_func)(void *priv, int jobnr, int threadnr, int nb_jobs, int nb_threads),
-                              void (*main_func)(void *priv),
+                              int (*worker_func)(void *priv, int jobnr, int threadnr, int nb_jobs, int nb_threads),
+                              int (*main_func)(void *priv),
                               int nb_threads)
 {
     *pctx = NULL;
     return AVERROR(ENOSYS);
 }
 
-void avpriv_slicethread_execute(AVSliceThread *ctx, int nb_jobs, int execute_main)
+int avpriv_slicethread_execute(AVSliceThread *ctx, int nb_jobs, int execute_main)
 {
     av_assert0(0);
+    return AVERROR(ENOSYS);
 }
 
 void avpriv_slicethread_free(AVSliceThread **pctx)

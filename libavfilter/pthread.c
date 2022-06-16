@@ -43,12 +43,13 @@ typedef struct ThreadContext {
     int   *rets;
 } ThreadContext;
 
-static void worker_func(void *priv, int jobnr, int threadnr, int nb_jobs, int nb_threads)
+static int worker_func(void *priv, int jobnr, int threadnr, int nb_jobs, int nb_threads)
 {
     ThreadContext *c = priv;
     int ret = c->func(c->ctx, c->arg, jobnr, nb_jobs);
     if (c->rets)
         c->rets[jobnr] = ret;
+    return ret;
 }
 
 static void slice_thread_uninit(ThreadContext *c)
