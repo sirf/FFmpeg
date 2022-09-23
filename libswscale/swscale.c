@@ -1213,8 +1213,8 @@ int attribute_align_arg sws_scale(struct SwsContext *c,
                           dst, dstStride, 0, c->dstH);
 }
 
-void ff_sws_slice_worker(void *priv, int jobnr, int threadnr,
-                         int nb_jobs, int nb_threads)
+int ff_sws_slice_worker(void *priv, int jobnr, int threadnr,
+                        int nb_jobs, int nb_threads)
 {
     SwsContext *parent = priv;
     SwsContext      *c = parent->slice_ctx[threadnr];
@@ -1243,4 +1243,5 @@ void ff_sws_slice_worker(void *priv, int jobnr, int threadnr,
     }
 
     parent->slice_err[threadnr] = err;
+    return err;
 }

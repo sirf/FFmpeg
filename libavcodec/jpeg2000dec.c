@@ -43,6 +43,114 @@
 #include "profiles.h"
 #include "thread.h"
 
+#if 0
+typedef struct Jpeg2000POCEntry {
+    uint16_t LYEpoc;
+    uint16_t CSpoc;
+    uint16_t CEpoc;
+    uint8_t RSpoc;
+    uint8_t REpoc;
+    uint8_t Ppoc;
+} Jpeg2000POCEntry;
+
+typedef struct Jpeg2000POC {
+    Jpeg2000POCEntry poc[MAX_POCS];
+    int nb_poc;
+    int is_default;
+} Jpeg2000POC;
+
+typedef struct Jpeg2000TilePart {
+    uint8_t tile_index;                 // Tile index who refers the tile-part
+    const uint8_t *tp_end;
+    GetByteContext header_tpg;          // bit stream of header if PPM header is used
+    GetByteContext tpg;                 // bit stream in tile-part
+} Jpeg2000TilePart;
+
+/* RMK: For JPEG2000 DCINEMA 3 tile-parts in a tile
+ * one per component, so tile_part elements have a size of 3 */
+typedef struct Jpeg2000DecTile {
+    Jpeg2000Component   *comp;
+    unsigned int        comp_size;
+    uint8_t             properties[4];
+    Jpeg2000CodingStyle codsty[4];
+    Jpeg2000QuantStyle  qntsty[4];
+    Jpeg2000POC         poc;
+    Jpeg2000TilePart    tile_part[32];
+    uint8_t             has_ppt;                // whether this tile has a ppt marker
+    uint8_t             *packed_headers;        // contains packed headers. Used only along with PPT marker
+    int                 packed_headers_size;    // size in bytes of the packed headers
+    GetByteContext      packed_headers_stream;  // byte context corresponding to packed headers
+    uint16_t tp_idx;                    // Tile-part index
+    int coord[2][2];                    // border coordinates {{x0, x1}, {y0, y1}}
+} Jpeg2000DecTile;
+
+typedef struct Jpeg2000IdwtThread {
+    int cb_start, cb_end;
+} Jpeg2000IdwtThread;
+
+typedef struct Jpeg2000CodeblockThread {
+    int tileno, compno, reslevelno, bandno, precno, cblkno;
+    int coded;
+} Jpeg2000CodeblockThread;
+
+typedef struct Jpeg2000DecoderContext {
+    AVClass         *class;
+    AVCodecContext  *avctx;
+    GetByteContext  g;
+
+    int             width, height;
+    int             image_offset_x, image_offset_y;
+    int             tile_offset_x, tile_offset_y;
+    uint8_t         cbps[4];    // bits per sample in particular components
+    uint8_t         sgnd[4];    // if a component is signed
+    uint8_t         properties[4];
+
+    uint8_t         has_ppm;
+    uint8_t         *packed_headers; // contains packed headers. Used only along with PPM marker
+    int             packed_headers_size;
+    GetByteContext  packed_headers_stream;
+    uint8_t         in_tile_headers;
+
+    int             cdx[4], cdy[4];
+    int             precision;
+    int             ncomponents;
+    int             colour_space;
+    uint32_t        palette[256];
+    int8_t          pal8;
+    int             cdef[4];
+    int             tile_width, tile_height;
+    unsigned        numXtiles, numYtiles;
+    int             maxtilelen;
+    AVRational      sar;
+
+    Jpeg2000CodingStyle codsty[4];
+    Jpeg2000QuantStyle  qntsty[4];
+    Jpeg2000POC         poc;
+    uint8_t             roi_shift[4];
+
+    int             bit_index;
+
+    int             curtileno;
+
+    Jpeg2000DecTile    *tile;
+    unsigned int    tile_size;
+    Jpeg2000DSPContext dsp;
+
+    /*options parameters*/
+    int             reduction_factor;
+
+    Jpeg2000IdwtThread *idwt;
+    unsigned int idwt_size;
+    Jpeg2000CodeblockThread *cb;
+    unsigned int cb_size;
+
+    // used for idwt slicing
+    int reslevel, dir, slices;
+    int have_dwt97_int; // 1 if any coding style is FF_DWT97_INT
+    int have_mct;
+} Jpeg2000DecoderContext;
+#endif
+
 /* get_bits functions for JPEG2000 packet bitstream
  * It is a get_bit function with a bit-stuffing routine. If the value of the
  * byte is 0xFF, the next byte includes an extra zero bit stuffed into the MSB.
@@ -70,24 +178,24 @@ static void jpeg2000_flush(Jpeg2000DecoderContext *s)
 }
 
 /* decode the value stored in node */
-static int tag_tree_decode(Jpeg2000DecoderContext *s, Jpeg2000TgtNode *node,
+static int tag_tree_decode(Jpeg2000DecoderContext *s, Jpeg2000TgtNode *nodes, int32_t node,
                            int threshold)
 {
     Jpeg2000TgtNode *stack[30];
     int sp = -1, curval = 0;
 
-    if (!node) {
+    if (node < 0) {
         av_log(s->avctx, AV_LOG_ERROR, "missing node\n");
         return AVERROR_INVALIDDATA;
     }
 
-    while (node && !node->vis) {
-        stack[++sp] = node;
-        node        = node->parent;
+    while (node >= 0 && !nodes[node].vis) {
+        stack[++sp] = &nodes[node];
+        node        = nodes[node].parent;
     }
 
-    if (node)
-        curval = node->val;
+    if (node >= 0)
+        curval = nodes[node].val;
     else
         curval = stack[sp]->val;
 
@@ -267,8 +375,7 @@ static int get_siz(Jpeg2000DecoderContext *s)
         return AVERROR(EINVAL);
     }
 
-    s->tile = av_calloc(s->numXtiles * s->numYtiles, sizeof(*s->tile));
-    if (!s->tile) {
+    if (av_fast_recalloc(&s->tile, &s->tile_size, s->numXtiles * s->numYtiles, sizeof(*s->tile))) {
         s->numXtiles = s->numYtiles = 0;
         return AVERROR(ENOMEM);
     }
@@ -276,8 +383,7 @@ static int get_siz(Jpeg2000DecoderContext *s)
     for (i = 0; i < s->numXtiles * s->numYtiles; i++) {
         Jpeg2000DecTile *tile = s->tile + i;
 
-        tile->comp = av_mallocz(s->ncomponents * sizeof(*tile->comp));
-        if (!tile->comp)
+        if (av_fast_recalloc(&tile->comp, &tile->comp_size, s->ncomponents, sizeof(*tile->comp)))
             return AVERROR(ENOMEM);
     }
 
@@ -436,9 +542,10 @@ static int get_cox(Jpeg2000DecoderContext *s, Jpeg2000CodingStyle *c)
     }
     c->transform = bytestream2_get_byteu(&s->g); // DWT transformation type
     /* set integer 9/7 DWT in case of BITEXACT flag */
-    if ((s->avctx->flags & AV_CODEC_FLAG_BITEXACT) && (c->transform == FF_DWT97))
+    if ((s->avctx->flags & AV_CODEC_FLAG_BITEXACT) && (c->transform == FF_DWT97)) {
         c->transform = FF_DWT97_INT;
-    else if (c->transform == FF_DWT53) {
+        s->have_dwt97_int = 1;
+    } else if (c->transform == FF_DWT53) {
         s->avctx->properties |= FF_CODEC_PROPERTY_LOSSLESS;
     }
 
@@ -489,6 +596,9 @@ static int get_cod(Jpeg2000DecoderContext *s, Jpeg2000CodingStyle *c,
                tmp.mct, s->ncomponents);
         return AVERROR_INVALIDDATA;
     }
+
+    if (tmp.mct)
+        s->have_mct = 1;
 
     if ((ret = get_cox(s, &tmp)) < 0)
         return ret;
@@ -905,12 +1015,19 @@ static int get_ppt(Jpeg2000DecoderContext *s, int n)
     return 0;
 }
 
-static int init_tile(Jpeg2000DecoderContext *s, int tileno)
+static int init_tile(AVCodecContext *avctx, void *td,
+                     int jobnr, int threadnr)
 {
-    int compno;
-    int tilex = tileno % s->numXtiles;
-    int tiley = tileno / s->numXtiles;
-    Jpeg2000DecTile *tile = s->tile + tileno;
+    Jpeg2000DecoderContext *s   = avctx->priv_data;
+    int tileno                  = jobnr / s->ncomponents;
+    int tilex                   = tileno % s->numXtiles;
+    int tiley                   = tileno / s->numXtiles;
+    int compno                  = jobnr % s->ncomponents;
+    Jpeg2000DecTile *tile       = s->tile + tileno;
+    Jpeg2000Component *comp     = tile->comp + compno;
+    Jpeg2000CodingStyle *codsty = tile->codsty + compno;
+    Jpeg2000QuantStyle  *qntsty = tile->qntsty + compno;
+    int ret; // global bandno
 
     if (!tile->comp)
         return AVERROR(ENOMEM);
@@ -919,12 +1036,6 @@ static int init_tile(Jpeg2000DecoderContext *s, int tileno)
     tile->coord[0][1] = av_clip((tilex + 1) * (int64_t)s->tile_width  + s->tile_offset_x, s->image_offset_x, s->width);
     tile->coord[1][0] = av_clip(tiley       * (int64_t)s->tile_height + s->tile_offset_y, s->image_offset_y, s->height);
     tile->coord[1][1] = av_clip((tiley + 1) * (int64_t)s->tile_height + s->tile_offset_y, s->image_offset_y, s->height);
-
-    for (compno = 0; compno < s->ncomponents; compno++) {
-        Jpeg2000Component *comp = tile->comp + compno;
-        Jpeg2000CodingStyle *codsty = tile->codsty + compno;
-        Jpeg2000QuantStyle  *qntsty = tile->qntsty + compno;
-        int ret; // global bandno
 
         comp->coord_o[0][0] = tile->coord[0][0];
         comp->coord_o[0][1] = tile->coord[0][1];
@@ -947,9 +1058,9 @@ static int init_tile(Jpeg2000DecoderContext *s, int tileno)
             return AVERROR_INVALIDDATA;
         if (ret = ff_jpeg2000_init_component(comp, codsty, qntsty,
                                              s->cbps[compno], s->cdx[compno],
-                                             s->cdy[compno], s->avctx))
+                                             s->cdy[compno], s->avctx, s->slices))
             return ret;
-    }
+
     return 0;
 }
 
@@ -1050,14 +1161,14 @@ static int jpeg2000_decode_packet(Jpeg2000DecoderContext *s, Jpeg2000DecTile *ti
             if (cblk->npasses)
                 incl = get_bits(s, 1);
             else
-                incl = tag_tree_decode(s, prec->cblkincl + cblkno, layno + 1) == layno;
+                incl = tag_tree_decode(s, prec->cblkincl, cblkno, layno + 1) == layno;
             if (!incl)
                 continue;
             else if (incl < 0)
                 return incl;
 
             if (!cblk->npasses) {
-                int zbp = tag_tree_decode(s, prec->zerobits + cblkno, 100);
+                int zbp = tag_tree_decode(s, prec->zerobits, cblkno, 100);
                 int v = expn[bandno] + numgbits - 1 - zbp;
                 cblk->zbp = zbp;
                 if (/*v < 0 ||*/ v > 30) {
@@ -1086,9 +1197,7 @@ static int jpeg2000_decode_packet(Jpeg2000DecoderContext *s, Jpeg2000DecTile *ti
 
             cblk->nb_lengthinc = 0;
             cblk->nb_terminationsinc = 0;
-            av_free(cblk->lengthinc);
-            cblk->lengthinc = av_calloc(newpasses, sizeof(*cblk->lengthinc));
-            if (!cblk->lengthinc)
+            if (av_fast_recalloc(&cblk->lengthinc, &cblk->lengthinc_size, newpasses, sizeof(*cblk->lengthinc)))
                 return AVERROR(ENOMEM);
             tmp = av_realloc_array(cblk->data_start, cblk->nb_terminations + newpasses + 1, sizeof(*cblk->data_start));
             if (!tmp)
@@ -1195,7 +1304,6 @@ static int jpeg2000_decode_packet(Jpeg2000DecoderContext *s, Jpeg2000DecTile *ti
                     cblk->data_start[cblk->nb_terminations] = cblk->length;
                 }
             }
-            av_freep(&cblk->lengthinc);
         }
     }
     // Save state of stream
@@ -1860,101 +1968,144 @@ static inline void roi_scale_cblk(Jpeg2000Cblk *cblk,
     }
 }
 
-static inline void tile_codeblocks(const Jpeg2000DecoderContext *s, Jpeg2000DecTile *tile)
+static int jpeg2000_decode_cb(const AVCodecContext *avctx, void *td,
+                              int jobnr, int threadnr)
 {
     Jpeg2000T1Context t1;
+    Jpeg2000DecoderContext *s   = avctx->priv_data;
+    Jpeg2000CodeblockThread *cb = s->cb + jobnr;
+    Jpeg2000DecTile *tile       = s->tile + cb->tileno;
+    Jpeg2000Component *comp     = tile->comp + cb->compno;
+    Jpeg2000CodingStyle *codsty = tile->codsty + cb->compno;
+    Jpeg2000ResLevel *rlevel    = comp->reslevel + cb->reslevelno;
+    Jpeg2000Band *band          = rlevel->band + cb->bandno;
+    Jpeg2000Prec *prec          = band->prec + cb->precno;
+    Jpeg2000Cblk *cblk          = prec->cblk + cb->cblkno;
+    Jpeg2000QuantStyle *quantsty= s->qntsty;
+    int ret, x, y, bandpos      = cb->bandno + (cb->reslevelno > 0);
+    int magp;
 
-    int compno, reslevelno, bandno;
-    int subbandno;
+    t1.stride = (1<<codsty->log2_cblk_width) + 2;
+    cb->coded = 0;
 
-    /* Loop on tile components */
-    for (compno = 0; compno < s->ncomponents; compno++) {
-        Jpeg2000Component *comp        = tile->comp + compno;
-        Jpeg2000CodingStyle *codsty    = tile->codsty + compno;
-        Jpeg2000QuantStyle *quantsty   = tile->qntsty + compno;
-        int coded = 0;
-        subbandno = 0;
+    // Annex E (Equation E-2) ISO/IEC 15444-1:2019
+    magp = quantsty->expn[1/*subbandno*/] + quantsty->nguardbits - 1;
 
-        t1.stride = (1<<codsty->log2_cblk_width) + 2;
+    if (s->is_htj2k)
+        ret = decode_htj2k(s, codsty, &t1, cblk,
+                           cblk->coord[0][1] - cblk->coord[0][0],
+                           cblk->coord[1][1] - cblk->coord[1][0],
+                           magp, comp->roi_shift);
+    else
+        ret = decode_cblk(s, codsty, &t1, cblk,
+                          cblk->coord[0][1] - cblk->coord[0][0],
+                          cblk->coord[1][1] - cblk->coord[1][0],
+                          bandpos, comp->roi_shift);
+    if (ret)
+        cb->coded = 1;
+    else
+        return 0;
 
-        /* Loop on resolution levels */
-        for (reslevelno = 0; reslevelno < codsty->nreslevels2decode; reslevelno++) {
-            Jpeg2000ResLevel *rlevel = comp->reslevel + reslevelno;
-            /* Loop on bands */
-            for (bandno = 0; bandno < rlevel->nbands; bandno++,subbandno++) {
-                int nb_precincts, precno;
-                Jpeg2000Band *band = rlevel->band + bandno;
-                int cblkno = 0, bandpos;
+    x = cblk->coord[0][0] - band->coord[0][0];
+    y = cblk->coord[1][0] - band->coord[1][0];
 
-                bandpos = bandno + (reslevelno > 0);
+    if (comp->roi_shift)
+        roi_scale_cblk(cblk, comp, &t1);
+    if (codsty->transform == FF_DWT97)
+        dequantization_float(x, y, cblk, comp, &t1, band);
+    else if (codsty->transform == FF_DWT97_INT)
+        dequantization_int_97(x, y, cblk, comp, &t1, band);
+    else
+        dequantization_int(x, y, cblk, comp, &t1, band);
 
-                if (band->coord[0][0] == band->coord[0][1] ||
-                    band->coord[1][0] == band->coord[1][1])
-                    continue;
+    return 0;
+}
 
-                nb_precincts = rlevel->num_precincts_x * rlevel->num_precincts_y;
-                /* Loop on precincts */
-                for (precno = 0; precno < nb_precincts; precno++) {
-                    Jpeg2000Prec *prec = band->prec + precno;
+static int jpeg2000_dwt97_int_preshift(AVCodecContext *avctx, void *td,
+                                       int jobnr, int threadnr)
+{
+    Jpeg2000DecoderContext *s   = avctx->priv_data;
+    Jpeg2000IdwtThread *idwt    = s->idwt + jobnr / s->slices;
+    Jpeg2000DecTile *tile          = s->tile + jobnr / s->slices / s->ncomponents;
+    int compno                  = (jobnr / s->slices) % s->ncomponents;
+    int slice                   = jobnr % s->slices;
+    Jpeg2000Component *comp     = tile->comp + compno;
+    Jpeg2000CodingStyle *codsty = tile->codsty + compno;
+    int a = comp->dwt.linelen[comp->dwt.ndeclevels - 1][0] *
+            comp->dwt.linelen[comp->dwt.ndeclevels - 1][1];
+    int as = (a + s->slices - 1)/s->slices;
 
-                    /* Loop on codeblocks */
-                    for (cblkno = 0;
-                         cblkno < prec->nb_codeblocks_width * prec->nb_codeblocks_height;
-                         cblkno++) {
-                        int x, y, ret, magp;
-                        Jpeg2000Cblk *cblk = prec->cblk + cblkno;
-                        // Annex E (Equation E-2) ISO/IEC 15444-1:2019
-                        magp = quantsty->expn[subbandno] + quantsty->nguardbits - 1;
+    for (int i = idwt->cb_start; i < idwt->cb_end; i++) {
+        if (s->cb[i].coded) {
+            if (codsty->transform == FF_DWT97_INT) {
+                for (int i = as*slice; i - as < as*slice; i++)
+                    comp->i_data[i] *= 1LL << I_PRESHIFT;
+            }
+            break;
+        }
+    }
 
-                        if (s->is_htj2k)
-                            ret = decode_htj2k(s, codsty, &t1, cblk,
-                                               cblk->coord[0][1] - cblk->coord[0][0],
-                                               cblk->coord[1][1] - cblk->coord[1][0],
-                                               magp, comp->roi_shift);
-                        else
-                            ret = decode_cblk(s, codsty, &t1, cblk,
-                                              cblk->coord[0][1] - cblk->coord[0][0],
-                                              cblk->coord[1][1] - cblk->coord[1][0],
-                                              bandpos, comp->roi_shift);
-                        if (ret)
-                            coded = 1;
-                        else
-                            continue;
-                        x = cblk->coord[0][0] - band->coord[0][0];
-                        y = cblk->coord[1][0] - band->coord[1][0];
+    return 0;
+}
 
-                        if (comp->roi_shift)
-                            roi_scale_cblk(cblk, comp, &t1);
-                        if (codsty->transform == FF_DWT97)
-                            dequantization_float(x, y, cblk, comp, &t1, band);
-                        else if (codsty->transform == FF_DWT97_INT)
-                            dequantization_int_97(x, y, cblk, comp, &t1, band);
-                        else
-                            dequantization_int(x, y, cblk, comp, &t1, band);
-                   } /* end cblk */
-                } /*end prec */
-            } /* end band */
-        } /* end reslevel */
+static int jpeg2000_idwt(AVCodecContext *avctx, void *td,
+                         int jobnr, int threadnr)
+{
+    Jpeg2000DecoderContext *s   = avctx->priv_data;
+    Jpeg2000IdwtThread *idwt    = s->idwt + jobnr / s->slices;
+    Jpeg2000DecTile *tile          = s->tile + jobnr / s->slices / s->ncomponents;
+    int compno                  = (jobnr / s->slices) % s->ncomponents;
+    int slice                   = jobnr % s->slices;
+    Jpeg2000Component *comp     = tile->comp + compno;
+    Jpeg2000CodingStyle *codsty = tile->codsty + compno;
 
-        /* inverse DWT */
-        if (coded)
-            ff_dwt_decode(&comp->dwt, codsty->transform == FF_DWT97 ? (void*)comp->f_data : (void*)comp->i_data);
+    for (int i = idwt->cb_start; i < idwt->cb_end; i++) {
+        if (s->cb[i].coded) {
+            ff_dwt_decode_thread(&comp->dwt, codsty->transform == FF_DWT97 ? (void*)comp->f_data : (void*)comp->i_data, s->reslevel, s->dir, slice, s->slices);
+            break;
+        }
+    }
 
-    } /*end comp */
+    return 0;
+}
+
+static int jpeg2000_dwt97_int_postshift(AVCodecContext *avctx, void *td,
+                                        int jobnr, int threadnr)
+{
+    Jpeg2000DecoderContext *s   = avctx->priv_data;
+    Jpeg2000IdwtThread *idwt    = s->idwt + jobnr / s->slices;
+    Jpeg2000DecTile *tile          = s->tile + jobnr / s->slices / s->ncomponents;
+    int compno                  = (jobnr / s->slices) % s->ncomponents;
+    int slice                   = jobnr % s->slices;
+    Jpeg2000Component *comp     = tile->comp + compno;
+    Jpeg2000CodingStyle *codsty = tile->codsty + compno;
+    int a = comp->dwt.linelen[comp->dwt.ndeclevels - 1][0] *
+            comp->dwt.linelen[comp->dwt.ndeclevels - 1][1];
+    int as = (a + s->slices - 1)/s->slices;
+
+    for (int i = idwt->cb_start; i < idwt->cb_end; i++) {
+        if (s->cb[i].coded) {
+            if (codsty->transform == FF_DWT97_INT) {
+                for (int i = as*slice; i - as < as*slice; i++)
+                    comp->i_data[i] = (comp->i_data[i] + ((1LL<<I_PRESHIFT)>>1)) >> I_PRESHIFT;
+            }
+            break;
+        }
+    }
+
+    return 0;
 }
 
 #define WRITE_FRAME(D, PIXEL)                                                                     \
-    static inline void write_frame_ ## D(const Jpeg2000DecoderContext * s, Jpeg2000DecTile * tile,   \
-                                         AVFrame * picture, int precision)                        \
+    static inline void write_frame_ ## D(const Jpeg2000DecoderContext * s, Jpeg2000DecTile * tile,\
+                                         AVFrame * picture, int precision, int compno)            \
     {                                                                                             \
         const AVPixFmtDescriptor *pixdesc = av_pix_fmt_desc_get(s->avctx->pix_fmt);               \
         int planar    = !!(pixdesc->flags & AV_PIX_FMT_FLAG_PLANAR);                              \
         int pixelsize = planar ? 1 : pixdesc->nb_components;                                      \
                                                                                                   \
-        int compno;                                                                               \
         int x, y;                                                                                 \
                                                                                                   \
-        for (compno = 0; compno < s->ncomponents; compno++) {                                     \
             Jpeg2000Component *comp     = tile->comp + compno;                                    \
             Jpeg2000CodingStyle *codsty = tile->codsty + compno;                                  \
             PIXEL *line;                                                                          \
@@ -2001,8 +2152,6 @@ static inline void tile_codeblocks(const Jpeg2000DecoderContext *s, Jpeg2000DecT
                 }                                                                                 \
                 line += picture->linesize[plane] / sizeof(PIXEL);                                 \
             }                                                                                     \
-        }                                                                                         \
-                                                                                                  \
     }
 
 WRITE_FRAME(8, uint8_t)
@@ -2010,28 +2159,36 @@ WRITE_FRAME(16, uint16_t)
 
 #undef WRITE_FRAME
 
-static int jpeg2000_decode_tile(AVCodecContext *avctx, void *td,
-                                int jobnr, int threadnr)
+static int jpeg2000_mct(AVCodecContext *avctx, void *td,
+                        int jobnr, int threadnr)
 {
     const Jpeg2000DecoderContext *s = avctx->priv_data;
-    AVFrame *picture = td;
     Jpeg2000DecTile *tile = s->tile + jobnr;
-
-    tile_codeblocks(s, tile);
 
     /* inverse MCT transformation */
     if (tile->codsty[0].mct)
         mct_decode(s, tile);
 
+    return 0;
+}
+
+static int jpeg2000_write_frame(AVCodecContext *avctx, void *td,
+                                int jobnr, int threadnr)
+{
+    Jpeg2000DecoderContext *s = avctx->priv_data;
+    AVFrame *picture = td;
+    Jpeg2000DecTile *tile = s->tile + jobnr / s->ncomponents;
+    int compno = jobnr % s->ncomponents;
+
     if (s->precision <= 8) {
-        write_frame_8(s, tile, picture, 8);
+        write_frame_8(s, tile, picture, 8, compno);
     } else {
         int precision = picture->format == AV_PIX_FMT_XYZ12 ||
                         picture->format == AV_PIX_FMT_RGB48 ||
                         picture->format == AV_PIX_FMT_RGBA64 ||
                         picture->format == AV_PIX_FMT_GRAY16 ? 16 : s->precision;
 
-        write_frame_16(s, tile, picture, precision);
+        write_frame_16(s, tile, picture, precision, compno);
     }
 
     return 0;
@@ -2039,24 +2196,9 @@ static int jpeg2000_decode_tile(AVCodecContext *avctx, void *td,
 
 static void jpeg2000_dec_cleanup(Jpeg2000DecoderContext *s)
 {
-    int tileno, compno;
-    for (tileno = 0; tileno < s->numXtiles * s->numYtiles; tileno++) {
-        if (s->tile[tileno].comp) {
-            for (compno = 0; compno < s->ncomponents; compno++) {
-                Jpeg2000Component *comp     = s->tile[tileno].comp   + compno;
-                Jpeg2000CodingStyle *codsty = s->tile[tileno].codsty + compno;
-
-                ff_jpeg2000_cleanup(comp, codsty);
-            }
-            av_freep(&s->tile[tileno].comp);
-            av_freep(&s->tile[tileno].packed_headers);
-            s->tile[tileno].packed_headers_size = 0;
-        }
-    }
     av_freep(&s->packed_headers);
     s->packed_headers_size = 0;
     memset(&s->packed_headers_stream, 0, sizeof(s->packed_headers_stream));
-    av_freep(&s->tile);
     memset(s->codsty, 0, sizeof(s->codsty));
     memset(s->qntsty, 0, sizeof(s->qntsty));
     memset(s->properties, 0, sizeof(s->properties));
@@ -2239,9 +2381,6 @@ static int jpeg2000_read_bitstream_packets(Jpeg2000DecoderContext *s)
     for (tileno = 0; tileno < s->numXtiles * s->numYtiles; tileno++) {
         Jpeg2000DecTile *tile = s->tile + tileno;
 
-        if ((ret = init_tile(s, tileno)) < 0)
-            return ret;
-
         if ((ret = jpeg2000_decode_packets(s, tile)) < 0)
             return ret;
     }
@@ -2408,11 +2547,82 @@ static av_cold int jpeg2000_decode_init(AVCodecContext *avctx)
     return 0;
 }
 
+static int jpeg2000_setup_cbs(Jpeg2000DecoderContext *s, int *cbs_out, int *maxreslevels_out)
+{
+    if (s->numXtiles * s->numYtiles > INT_MAX/sizeof(*s->idwt)/s->ncomponents)
+        return AVERROR(ENOMEM);
+
+    av_fast_malloc(&s->idwt, &s->idwt_size, s->numXtiles * s->numYtiles * s->ncomponents * sizeof(*s->idwt));
+    if (!s->idwt)
+        return AVERROR(ENOMEM);
+
+    for (int pass = 0; pass < 2; pass++) {
+        int cbs = 0, maxreslevels = 0;
+        for (int tileno = 0; tileno < s->numXtiles * s->numYtiles; tileno++) {
+            for (int compno = 0; compno < s->ncomponents; compno++) {
+                Jpeg2000DecTile *tile          = s->tile + tileno;
+                Jpeg2000Component *comp     = tile->comp + compno;
+                Jpeg2000CodingStyle *codsty = tile->codsty + compno;
+                Jpeg2000IdwtThread *idwt    = s->idwt + compno + tileno * s->ncomponents;
+
+                idwt->cb_start = cbs;
+                maxreslevels = FFMAX(maxreslevels, codsty->nreslevels2decode);
+
+                for (int reslevelno = 0; reslevelno < codsty->nreslevels2decode; reslevelno++) {
+                    Jpeg2000ResLevel *rlevel = comp->reslevel + reslevelno;
+                    for (int bandno = 0; bandno < rlevel->nbands; bandno++) {
+                        int nb_precincts = rlevel->num_precincts_x * rlevel->num_precincts_y;
+                        Jpeg2000Band *band = rlevel->band + bandno;
+
+                        if (band->coord[0][0] == band->coord[0][1] ||
+                            band->coord[1][0] == band->coord[1][1])
+                            continue;
+
+                        for (int precno = 0; precno < nb_precincts; precno++) {
+                            Jpeg2000Prec *prec = band->prec + precno;
+                            int prec_cbs = prec->nb_codeblocks_width * prec->nb_codeblocks_height;
+
+                            if (cbs > INT_MAX - prec_cbs)
+                                return AVERROR(ENOMEM);
+
+                            for (int cblkno = 0; cblkno < prec_cbs; cblkno++, cbs++) {
+                                if (pass == 1) {
+                                    Jpeg2000CodeblockThread *cb = s->cb + cbs;
+                                    cb->tileno = tileno;
+                                    cb->compno = compno;
+                                    cb->reslevelno = reslevelno;
+                                    cb->bandno = bandno;
+                                    cb->precno = precno;
+                                    cb->cblkno = cblkno;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                idwt->cb_end = cbs;
+            }
+        }
+
+        if (pass == 0) {
+            if (cbs > INT_MAX/sizeof(*s->cb))
+                return AVERROR(ENOMEM);
+            av_fast_malloc(&s->cb, &s->cb_size, cbs*sizeof(*s->cb));
+            if (!s->cb)
+                return AVERROR(ENOMEM);
+        }
+
+        *cbs_out = cbs;
+        *maxreslevels_out = maxreslevels;
+    }
+    return 0;
+}
+
 static int jpeg2000_decode_frame(AVCodecContext *avctx, AVFrame *picture,
                                  int *got_frame, AVPacket *avpkt)
 {
     Jpeg2000DecoderContext *s = avctx->priv_data;
-    int ret;
+    int ret, cbs, maxreslevels;
 
     s->avctx     = avctx;
     bytestream2_init(&s->g, avpkt->data, avpkt->size);
@@ -2455,6 +2665,11 @@ static int jpeg2000_decode_frame(AVCodecContext *avctx, AVFrame *picture,
         goto end;
     picture->pict_type = AV_PICTURE_TYPE_I;
     picture->key_frame = 1;
+    if (avctx->skip_frame != AVDISCARD_ALL) {
+    s->slices = avctx->active_thread_type == FF_THREAD_SLICE ? avctx->thread_count : 1;
+
+    if ((ret = avctx->execute2(avctx, init_tile, NULL, NULL, s->numXtiles * s->numYtiles * s->ncomponents)) < 0)
+        goto end;
 
     if (ret = jpeg2000_read_bitstream_packets(s))
         goto end;
@@ -2470,7 +2685,48 @@ static int jpeg2000_decode_frame(AVCodecContext *avctx, AVFrame *picture,
         }
     }
 
-    avctx->execute2(avctx, jpeg2000_decode_tile, picture, NULL, s->numXtiles * s->numYtiles);
+    if ((ret = jpeg2000_setup_cbs(s, &cbs, &maxreslevels)) < 0 ||
+        (ret = avctx->execute2(avctx, jpeg2000_decode_cb, NULL, NULL, cbs)) < 0)
+        goto end;
+
+    if (s->have_dwt97_int &&
+        (ret = avctx->execute2(avctx, jpeg2000_dwt97_int_preshift, NULL, NULL,
+            s->numXtiles * s->numYtiles * s->ncomponents * s->slices)) < 0)
+        goto end;
+
+    for (s->reslevel = 0; s->reslevel < maxreslevels; s->reslevel++) {
+        for (s->dir = 0; s->dir < 2; s->dir++) {
+            int before = s->slices;
+            int div = s->slices >= 96 ? 7 : 5;
+
+            if (s->reslevel < div) {
+                int halve = 1<<(div - s->reslevel + (s->slices >= 96 ? 0 : 1 - s->dir));
+                s->slices = (s->slices + halve-1)/halve;
+            }
+
+            if ((ret = avctx->execute2(avctx, jpeg2000_idwt, NULL, NULL,
+                    s->numXtiles * s->numYtiles * s->ncomponents * s->slices)) < 0)
+                goto end;
+
+            s->slices = before;
+        }
+    }
+
+    if (s->have_dwt97_int &&
+        (ret = avctx->execute2(avctx, jpeg2000_dwt97_int_postshift, NULL, NULL,
+            s->numXtiles * s->numYtiles * s->ncomponents * s->slices)) < 0)
+        goto end;
+
+    if (s->have_mct &&
+        (ret = avctx->execute2(avctx, jpeg2000_mct, NULL, NULL, s->numXtiles * s->numYtiles)) < 0)
+        goto end;
+
+    if ((ret = avctx->execute2(avctx, jpeg2000_write_frame, picture, NULL,
+            s->numXtiles * s->numYtiles * s->ncomponents)) < 0)
+        goto end;
+    } else {
+        av_log(avctx, AV_LOG_ERROR, "skipping\n");
+    }
 
     jpeg2000_dec_cleanup(s);
 
@@ -2487,6 +2743,29 @@ static int jpeg2000_decode_frame(AVCodecContext *avctx, AVFrame *picture,
 end:
     jpeg2000_dec_cleanup(s);
     return ret;
+}
+
+static av_cold int jpeg2000_decode_close(AVCodecContext *avctx)
+{
+    Jpeg2000DecoderContext *s = avctx->priv_data;
+
+    for (int tileno = 0; tileno < s->tile_size/sizeof(*s->tile); tileno++) {
+        if (s->tile[tileno].comp) {
+            for (int compno = 0; compno < s->tile[tileno].comp_size/sizeof(*s->tile[tileno].comp); compno++) {
+                Jpeg2000Component *comp     = s->tile[tileno].comp   + compno;
+                Jpeg2000CodingStyle *codsty = s->tile[tileno].codsty + compno;
+
+                ff_jpeg2000_cleanup(comp, codsty);
+            }
+            av_freep(&s->tile[tileno].comp);
+            av_freep(&s->tile[tileno].packed_headers);
+        }
+    }
+    av_freep(&s->tile);
+    av_freep(&s->idwt);
+    av_freep(&s->cb);
+
+    return 0;
 }
 
 #define OFFSET(x) offsetof(Jpeg2000DecoderContext, x)
@@ -2514,7 +2793,9 @@ const FFCodec ff_jpeg2000_decoder = {
     .priv_data_size   = sizeof(Jpeg2000DecoderContext),
     .init             = jpeg2000_decode_init,
     FF_CODEC_DECODE_CB(jpeg2000_decode_frame),
+    .close            = jpeg2000_decode_close,
     .p.priv_class     = &jpeg2000_class,
     .p.max_lowres     = 5,
     .p.profiles       = NULL_IF_CONFIG_SMALL(ff_jpeg2000_profiles),
+    .caps_internal    = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
 };

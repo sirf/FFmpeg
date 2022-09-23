@@ -32,6 +32,7 @@
 #define FF_DWT_MAX_DECLVLS 32 ///< max number of decomposition levels
 #define F_LFTG_K      1.230174104914001f
 #define F_LFTG_X      0.812893066115961f
+#define I_PRESHIFT 8
 
 enum DWTType {
     FF_DWT97,
@@ -47,7 +48,11 @@ typedef struct DWTContext {
     uint8_t ndeclevels;                  ///< number of decomposition levels
     uint8_t type;                        ///< 0 for 9/7; 1 for 5/3
     int32_t *i_linebuf;                  ///< int buffer used by transform
+    unsigned int i_linebuf_size;
     float   *f_linebuf;                  ///< float buffer used by transform
+    unsigned int f_linebuf_size;
+    int max_slices;
+    int linesize;
 } DWTContext;
 
 /**
@@ -58,10 +63,11 @@ typedef struct DWTContext {
  * @param type              0 for DWT 9/7; 1 for DWT 5/3
  */
 int ff_jpeg2000_dwt_init(DWTContext *s, int border[2][2],
-                         int decomp_levels, int type);
+                         int decomp_levels, int type, int max_slices);
 
 int ff_dwt_encode(DWTContext *s, void *t);
 int ff_dwt_decode(DWTContext *s, void *t);
+int ff_dwt_decode_thread(DWTContext *s, void *t, int lev, int dir, int slice, int slices);
 
 void ff_dwt_destroy(DWTContext *s);
 

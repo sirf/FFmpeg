@@ -129,10 +129,10 @@ typedef struct Jpeg2000T1Context {
 } Jpeg2000T1Context;
 
 typedef struct Jpeg2000TgtNode {
+    int32_t parent;
     uint8_t val;
     uint8_t temp_val;
     uint8_t vis;
-    struct Jpeg2000TgtNode *parent;
 } Jpeg2000TgtNode;
 
 typedef struct Jpeg2000CodingStyle {
@@ -179,6 +179,7 @@ typedef struct Jpeg2000Cblk {
     uint8_t incl;
     uint16_t length;
     uint16_t *lengthinc;
+    unsigned int lengthinc_size;
     uint8_t nb_lengthinc;
     uint8_t lblock;
     uint8_t zbp;         // Zero bit planes
@@ -197,8 +198,11 @@ typedef struct Jpeg2000Prec {
     int nb_codeblocks_width;
     int nb_codeblocks_height;
     Jpeg2000TgtNode *zerobits;
+    unsigned int zerobits_size;
     Jpeg2000TgtNode *cblkincl;
+    unsigned int cblkincl_size;
     Jpeg2000Cblk *cblk;
+    unsigned int cblk_size;
     int decoded_layers;
     int coord[2][2]; // border coordinates {{x0, x1}, {y0, y1}}
 } Jpeg2000Prec; // precinct
@@ -209,6 +213,7 @@ typedef struct Jpeg2000Band {
     int i_stepsize; // quantization stepsize
     float f_stepsize; // quantization stepsize
     Jpeg2000Prec *prec;
+    unsigned int prec_size;
 } Jpeg2000Band; // subband
 
 typedef struct Jpeg2000ResLevel {
@@ -217,13 +222,17 @@ typedef struct Jpeg2000ResLevel {
     int num_precincts_x, num_precincts_y; // number of precincts in x/y direction
     uint8_t log2_prec_width, log2_prec_height; // exponent of precinct size
     Jpeg2000Band *band;
+    unsigned int band_size;
 } Jpeg2000ResLevel; // resolution level
 
 typedef struct Jpeg2000Component {
     Jpeg2000ResLevel *reslevel;
+    unsigned int reslevel_size;
     DWTContext dwt;
     float *f_data;
+    unsigned int f_data_size;
     int *i_data;
+    unsigned int i_data_size;
     int coord[2][2];   // border coordinates {{x0, x1}, {y0, y1}} -- can be reduced with lowres option
     int coord_o[2][2]; // border coordinates {{x0, x1}, {y0, y1}} -- original values from jpeg2000 headers
     uint8_t roi_shift; // ROI scaling value for the component
@@ -265,6 +274,7 @@ typedef struct Jpeg2000TilePart {
  * one per component, so tile_part elements have a size of 3 */
 typedef struct Jpeg2000Tile {
     Jpeg2000Component   *comp;
+    unsigned int        comp_size;
     uint8_t             properties[4];
     Jpeg2000CodingStyle codsty[4];
     Jpeg2000QuantStyle  qntsty[4];
@@ -277,6 +287,15 @@ typedef struct Jpeg2000Tile {
     uint16_t            tp_idx;                  // Tile-part index
     int                 coord[2][2];             // border coordinates {{x0, x1}, {y0, y1}}
 } Jpeg2000DecTile;
+
+typedef struct Jpeg2000IdwtThread {
+    int cb_start, cb_end;
+} Jpeg2000IdwtThread;
+
+typedef struct Jpeg2000CodeblockThread {
+    int tileno, compno, reslevelno, bandno, precno, cblkno;
+    int coded;
+} Jpeg2000CodeblockThread;
 
 typedef struct Jpeg2000DecoderContext {
     AVClass         *class;
@@ -318,12 +337,23 @@ typedef struct Jpeg2000DecoderContext {
     int             curtileno;
 
     Jpeg2000DecTile *tile;
+    unsigned int    tile_size;
     Jpeg2000DSPContext dsp;
 
     /*options parameters*/
     int             reduction_factor;
     /*HTJ2K params*/
     uint8_t         is_htj2k;
+
+    Jpeg2000IdwtThread *idwt;
+    unsigned int idwt_size;
+    Jpeg2000CodeblockThread *cb;
+    unsigned int cb_size;
+
+    // used for idwt slicing
+    int reslevel, dir, slices;
+    int have_dwt97_int; // 1 if any coding style is FF_DWT97_INT
+    int have_mct;
 } Jpeg2000DecoderContext;
 
 /* misc tools */
@@ -379,7 +409,7 @@ int ff_jpeg2000_init_component(Jpeg2000Component *comp,
                                Jpeg2000CodingStyle *codsty,
                                Jpeg2000QuantStyle *qntsty,
                                int cbps, int dx, int dy,
-                               AVCodecContext *ctx);
+                               AVCodecContext *ctx, int max_slices);
 
 void ff_jpeg2000_reinit(Jpeg2000Component *comp, Jpeg2000CodingStyle *codsty);
 

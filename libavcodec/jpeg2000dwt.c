@@ -45,7 +45,6 @@
 #define I_LFTG_DELTA   29066ll
 #define I_LFTG_K       80621ll
 #define I_LFTG_X       53274ll
-#define I_PRESHIFT 8
 
 static inline void extend53(int *p, int i0, int i1)
 {
@@ -322,24 +321,24 @@ static void sr_1d53(unsigned *p, int i0, int i1)
         p[2 * i + 1] += (int)(p[2 * i] + p[2 * i + 2]) >> 1;
 }
 
-static void dwt_decode53(DWTContext *s, int *t)
+static void dwt_decode53(DWTContext *s, int *t, int lev, int dir, int slice, int slices)
 {
-    int lev;
     int w     = s->linelen[s->ndeclevels - 1][0];
-    int32_t *line = s->i_linebuf;
-    line += 3;
+    int32_t *line = s->i_linebuf + slice * s->linesize + 3;
 
-    for (lev = 0; lev < s->ndeclevels; lev++) {
         int lh = s->linelen[lev][0],
             lv = s->linelen[lev][1],
             mh = s->mod[lev][0],
             mv = s->mod[lev][1],
+            sh = (lh + slices - 1)/slices,
+            sv = (lv + slices - 1)/slices,
             lp;
         int *l;
 
+    if (dir == 0) {
         // HOR_SD
         l = line + mh;
-        for (lp = 0; lp < lv; lp++) {
+        for (lp = slice*sv; lp < lv && lp - sv < slice*sv; lp++) {
             int i, j = 0;
             // copy with interleaving
             for (i = mh; i < lh; i += 2, j++)
@@ -352,10 +351,10 @@ static void dwt_decode53(DWTContext *s, int *t)
             for (i = 0; i < lh; i++)
                 t[w * lp + i] = l[i];
         }
-
+    } else {
         // VER_SD
         l = line + mv;
-        for (lp = 0; lp < lh; lp++) {
+        for (lp = slice*sh; lp < lh && lp - sh < slice*sh; lp++) {
             int i, j = 0;
             // copy with interleaving
             for (i = mv; i < lv; i += 2, j++)
@@ -398,25 +397,26 @@ static void sr_1d97_float(float *p, int i0, int i1)
         p[2 * i + 1] += F_LFTG_ALPHA * (p[2 * i]     + p[2 * i + 2]);
 }
 
-static void dwt_decode97_float(DWTContext *s, float *t)
+static void dwt_decode97_float(DWTContext *s, float *t, int lev, int dir, int slice, int slices)
 {
-    int lev;
     int w       = s->linelen[s->ndeclevels - 1][0];
-    float *line = s->f_linebuf;
-    float *data = t;
     /* position at index O of line range [0-5,w+5] cf. extend function */
-    line += 5;
+    float *line = s->f_linebuf + slice * s->linesize + 5;
+    float *data = t;
 
-    for (lev = 0; lev < s->ndeclevels; lev++) {
         int lh = s->linelen[lev][0],
             lv = s->linelen[lev][1],
             mh = s->mod[lev][0],
             mv = s->mod[lev][1],
+            sh = (lh + slices - 1)/slices,
+            sv = (lv + slices - 1)/slices,
             lp;
         float *l;
+
+    if (dir == 0) {
         // HOR_SD
         l = line + mh;
-        for (lp = 0; lp < lv; lp++) {
+        for (lp = slice*sv; lp < lv && lp - sv < slice*sv; lp++) {
             int i, j = 0;
             // copy with interleaving
             for (i = mh; i < lh; i += 2, j++)
@@ -429,10 +429,10 @@ static void dwt_decode97_float(DWTContext *s, float *t)
             for (i = 0; i < lh; i++)
                 data[w * lp + i] = l[i];
         }
-
+    } else {
         // VER_SD
         l = line + mv;
-        for (lp = 0; lp < lh; lp++) {
+        for (lp = slice*sh; lp < lh && lp - sh < slice*sh; lp++) {
             int i, j = 0;
             // copy with interleaving
             for (i = mv; i < lv; i += 2, j++)
@@ -475,30 +475,26 @@ static void sr_1d97_int(int32_t *p, int i0, int i1)
         p[2 * i + 1] += (I_LFTG_ALPHA * (p[2 * i]     + (int64_t)p[2 * i + 2]) + (1 << 15)) >> 16;
 }
 
-static void dwt_decode97_int(DWTContext *s, int32_t *t)
+static void dwt_decode97_int(DWTContext *s, int32_t *t, int lev, int dir, int slice, int slices)
 {
-    int lev;
     int w       = s->linelen[s->ndeclevels - 1][0];
-    int h       = s->linelen[s->ndeclevels - 1][1];
-    int i;
-    int32_t *line = s->i_linebuf;
-    int32_t *data = t;
     /* position at index O of line range [0-5,w+5] cf. extend function */
-    line += 5;
+    int32_t *line = s->i_linebuf + slice * s->linesize + 5;
+    int32_t *data = t;
 
-    for (i = 0; i < w * h; i++)
-        data[i] *= 1LL << I_PRESHIFT;
-
-    for (lev = 0; lev < s->ndeclevels; lev++) {
         int lh = s->linelen[lev][0],
             lv = s->linelen[lev][1],
             mh = s->mod[lev][0],
             mv = s->mod[lev][1],
+            sh = (lh + slices - 1)/slices,
+            sv = (lv + slices - 1)/slices,
             lp;
         int32_t *l;
+
+    if (dir == 0) {
         // HOR_SD
         l = line + mh;
-        for (lp = 0; lp < lv; lp++) {
+        for (lp = slice*sv; lp < lv && lp - sv < slice*sv; lp++) {
             int i, j = 0;
             // rescale with interleaving
             for (i = mh; i < lh; i += 2, j++)
@@ -511,10 +507,10 @@ static void dwt_decode97_int(DWTContext *s, int32_t *t)
             for (i = 0; i < lh; i++)
                 data[w * lp + i] = l[i];
         }
-
+    } else {
         // VER_SD
         l = line + mv;
-        for (lp = 0; lp < lh; lp++) {
+        for (lp = slice*sh; lp < lh && lp - sh < slice*sh; lp++) {
             int i, j = 0;
             // rescale with interleaving
             for (i = mv; i < lv; i += 2, j++)
@@ -528,26 +524,30 @@ static void dwt_decode97_int(DWTContext *s, int32_t *t)
                 data[w * i + lp] = l[i];
         }
     }
-
-    for (i = 0; i < w * h; i++)
-        data[i] = (data[i] + ((1LL<<I_PRESHIFT)>>1)) >> I_PRESHIFT;
 }
 
 int ff_jpeg2000_dwt_init(DWTContext *s, int border[2][2],
-                         int decomp_levels, int type)
+                         int decomp_levels, int type, int max_slices)
 {
-    int i, j, lev = decomp_levels, maxlen,
+    int i, j, lev = decomp_levels,
         b[2][2];
+    size_t prod;
 
     s->ndeclevels = decomp_levels;
     s->type       = type;
+    s->max_slices = max_slices;
+
+    if (s->max_slices > INT_MAX/FFMAX(sizeof(*s->f_linebuf),sizeof(*s->i_linebuf)))
+        return AVERROR(ENOMEM);
 
     for (i = 0; i < 2; i++)
         for (j = 0; j < 2; j++)
             b[i][j] = border[i][j];
 
-    maxlen = FFMAX(b[0][1] - b[0][0],
-                   b[1][1] - b[1][0]);
+    s->linesize   = FFMAX(b[0][1] - b[0][0],
+                          b[1][1] - b[1][0]) +
+                    (type == FF_DWT53 ? 6 : 12);
+
     while (--lev >= 0)
         for (i = 0; i < 2; i++) {
             s->linelen[lev][i] = b[i][1] - b[i][0];
@@ -555,24 +555,19 @@ int ff_jpeg2000_dwt_init(DWTContext *s, int border[2][2],
             for (j = 0; j < 2; j++)
                 b[i][j] = (b[i][j] + 1) >> 1;
         }
-    switch (type) {
-    case FF_DWT97:
-        s->f_linebuf = av_malloc_array((maxlen + 12), sizeof(*s->f_linebuf));
+
+    if (type == FF_DWT97) {
+        if (av_size_mult(s->linesize, s->max_slices*sizeof(*s->f_linebuf), &prod))
+            return AVERROR(ENOMEM);
+        av_fast_malloc(&s->f_linebuf, &s->f_linebuf_size, prod);
         if (!s->f_linebuf)
             return AVERROR(ENOMEM);
-        break;
-     case FF_DWT97_INT:
-        s->i_linebuf = av_malloc_array((maxlen + 12), sizeof(*s->i_linebuf));
+    } else {
+        if (av_size_mult(s->linesize, s->max_slices*sizeof(*s->i_linebuf), &prod))
+            return AVERROR(ENOMEM);
+        av_fast_malloc(&s->i_linebuf, &s->i_linebuf_size, prod);
         if (!s->i_linebuf)
             return AVERROR(ENOMEM);
-        break;
-    case FF_DWT53:
-        s->i_linebuf = av_malloc_array((maxlen +  6), sizeof(*s->i_linebuf));
-        if (!s->i_linebuf)
-            return AVERROR(ENOMEM);
-        break;
-    default:
-        return -1;
     }
     return 0;
 }
@@ -597,18 +592,46 @@ int ff_dwt_encode(DWTContext *s, void *t)
 
 int ff_dwt_decode(DWTContext *s, void *t)
 {
-    if (s->ndeclevels == 0)
+    int w = s->linelen[s->ndeclevels - 1][0];
+    int h = s->linelen[s->ndeclevels - 1][1];
+    int32_t *data = t;
+
+    if (s->type == FF_DWT97_INT)
+        for (int i = 0; i < w * h; i++)
+            data[i] *= 1LL << I_PRESHIFT;
+
+    for (int lev = 0; lev < s->ndeclevels; lev++)
+        for (int dir = 0; dir < 2; dir++)
+            for (int slice = 0; slice < s->max_slices; slice++) {
+                int ret = ff_dwt_decode_thread(s, t, lev, dir, slice, s->max_slices);
+                if (ret)
+                    return ret;
+            }
+
+    if (s->type == FF_DWT97_INT)
+        for (int i = 0; i < w * h; i++)
+            data[i] = (data[i] + ((1LL<<I_PRESHIFT)>>1)) >> I_PRESHIFT;
+
+    return 0;
+}
+
+int ff_dwt_decode_thread(DWTContext *s, void *t, int lev, int dir, int slice, int slices)
+{
+    slices = FFMIN(s->max_slices, slices);
+
+    // lev can be >= s->ndeclevels in files with mixed reslevels in tiles/components
+    if (s->ndeclevels == 0 || lev >= s->ndeclevels || slice >= slices)
         return 0;
 
     switch (s->type) {
     case FF_DWT97:
-        dwt_decode97_float(s, t);
+        dwt_decode97_float(s, t, lev, dir, slice, slices);
         break;
     case FF_DWT97_INT:
-        dwt_decode97_int(s, t);
+        dwt_decode97_int(s, t, lev, dir, slice, slices);
         break;
     case FF_DWT53:
-        dwt_decode53(s, t);
+        dwt_decode53(s, t, lev, dir, slice, slices);
         break;
     default:
         return -1;

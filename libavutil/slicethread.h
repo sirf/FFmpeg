@@ -31,8 +31,8 @@ typedef struct AVSliceThread AVSliceThread;
  * @return return number of threads or negative AVERROR on failure
  */
 int avpriv_slicethread_create(AVSliceThread **pctx, void *priv,
-                              void (*worker_func)(void *priv, int jobnr, int threadnr, int nb_jobs, int nb_threads),
-                              void (*main_func)(void *priv),
+                              int (*worker_func)(void *priv, int jobnr, int threadnr, int nb_jobs, int nb_threads),
+                              int (*main_func)(void *priv),
                               int nb_threads);
 
 /**
@@ -41,7 +41,7 @@ int avpriv_slicethread_create(AVSliceThread **pctx, void *priv,
  * @param nb_jobs number of jobs, must be > 0
  * @param execute_main also execute main_func
  */
-void avpriv_slicethread_execute(AVSliceThread *ctx, int nb_jobs, int execute_main);
+int avpriv_slicethread_execute(AVSliceThread *ctx, int nb_jobs, int execute_main);
 
 /**
  * Destroy slice threading context.

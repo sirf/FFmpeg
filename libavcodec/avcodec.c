@@ -44,28 +44,30 @@
 
 int avcodec_default_execute(AVCodecContext *c, int (*func)(AVCodecContext *c2, void *arg2), void *arg, int *ret, int count, int size)
 {
-    int i;
+    int i, rr = 0;
 
     for (i = 0; i < count; i++) {
         int r = func(c, (char *)arg + i * size);
+        rr = FFMIN(rr, r);
         if (ret)
             ret[i] = r;
     }
     emms_c();
-    return 0;
+    return rr;
 }
 
 int avcodec_default_execute2(AVCodecContext *c, int (*func)(AVCodecContext *c2, void *arg2, int jobnr, int threadnr), void *arg, int *ret, int count)
 {
-    int i;
+    int i, rr = 0;
 
     for (i = 0; i < count; i++) {
         int r = func(c, arg, i, 0);
+        rr = FFMIN(rr, r);
         if (ret)
             ret[i] = r;
     }
     emms_c();
-    return 0;
+    return rr;
 }
 
 static AVMutex codec_mutex = AV_MUTEX_INITIALIZER;
