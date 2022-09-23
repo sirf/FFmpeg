@@ -2648,6 +2648,7 @@ static int jpeg2000_decode_frame(AVCodecContext *avctx, AVFrame *picture,
         goto end;
     picture->pict_type = AV_PICTURE_TYPE_I;
     picture->key_frame = 1;
+    if (avctx->skip_frame != AVDISCARD_ALL) {
     s->slices = avctx->active_thread_type == FF_THREAD_SLICE ? avctx->thread_count : 1;
 
     if ((ret = avctx->execute2(avctx, init_tile, NULL, NULL, s->numXtiles * s->numYtiles * s->ncomponents)) < 0)
@@ -2706,6 +2707,9 @@ static int jpeg2000_decode_frame(AVCodecContext *avctx, AVFrame *picture,
     if ((ret = avctx->execute2(avctx, jpeg2000_write_frame, picture, NULL,
             s->numXtiles * s->numYtiles * s->ncomponents)) < 0)
         goto end;
+    } else {
+        av_log(avctx, AV_LOG_ERROR, "skipping\n");
+    }
 
     jpeg2000_dec_cleanup(s);
 
@@ -2776,4 +2780,5 @@ const FFCodec ff_jpeg2000_decoder = {
     .p.priv_class     = &jpeg2000_class,
     .p.max_lowres     = 5,
     .p.profiles       = NULL_IF_CONFIG_SMALL(ff_jpeg2000_profiles),
+    .caps_internal    = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
 };
