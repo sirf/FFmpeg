@@ -1989,7 +1989,7 @@ static int jpeg2000_decode_cb(AVCodecContext *avctx, void *td,
     cb->coded = 0;
 
     // Annex E (Equation E-2) ISO/IEC 15444-1:2019
-    magp = quantsty->expn[cb->bandno + cb->compno*rlevel->nbands] + quantsty->nguardbits - 1;
+    magp = quantsty->expn[cb->subbandno] + quantsty->nguardbits - 1;
 
     if (s->is_htj2k)
         ret = decode_htj2k(s, codsty, &t1, cblk,
@@ -2564,13 +2564,14 @@ static int jpeg2000_setup_cbs(Jpeg2000DecoderContext *s, int *cbs_out, int *maxr
                 Jpeg2000Component *comp     = tile->comp + compno;
                 Jpeg2000CodingStyle *codsty = tile->codsty + compno;
                 Jpeg2000IdwtThread *idwt    = s->idwt + compno + tileno * s->ncomponents;
+                int subbandno = 0;
 
                 idwt->cb_start = cbs;
                 maxreslevels = FFMAX(maxreslevels, codsty->nreslevels2decode);
 
                 for (int reslevelno = 0; reslevelno < codsty->nreslevels2decode; reslevelno++) {
                     Jpeg2000ResLevel *rlevel = comp->reslevel + reslevelno;
-                    for (int bandno = 0; bandno < rlevel->nbands; bandno++) {
+                    for (int bandno = 0; bandno < rlevel->nbands; bandno++, subbandno++) {
                         int nb_precincts = rlevel->num_precincts_x * rlevel->num_precincts_y;
                         Jpeg2000Band *band = rlevel->band + bandno;
 
@@ -2594,6 +2595,7 @@ static int jpeg2000_setup_cbs(Jpeg2000DecoderContext *s, int *cbs_out, int *maxr
                                     cb->bandno = bandno;
                                     cb->precno = precno;
                                     cb->cblkno = cblkno;
+                                    cb->subbandno = subbandno;
                                 }
                             }
                         }

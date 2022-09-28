@@ -295,6 +295,7 @@ typedef struct Jpeg2000IdwtThread {
 typedef struct Jpeg2000CodeblockThread {
     int tileno, compno, reslevelno, bandno, precno, cblkno;
     int coded;
+    int subbandno;
 } Jpeg2000CodeblockThread;
 
 typedef struct Jpeg2000DecoderContext {
