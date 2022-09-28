@@ -1968,7 +1968,7 @@ static inline void roi_scale_cblk(Jpeg2000Cblk *cblk,
     }
 }
 
-static int jpeg2000_decode_cb(const AVCodecContext *avctx, void *td,
+static int jpeg2000_decode_cb(AVCodecContext *avctx, void *td,
                               int jobnr, int threadnr)
 {
     Jpeg2000T1Context t1;
