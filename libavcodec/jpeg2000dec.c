@@ -1981,7 +1981,7 @@ static int jpeg2000_decode_cb(const AVCodecContext *avctx, void *td,
     Jpeg2000Band *band          = rlevel->band + cb->bandno;
     Jpeg2000Prec *prec          = band->prec + cb->precno;
     Jpeg2000Cblk *cblk          = prec->cblk + cb->cblkno;
-    Jpeg2000QuantStyle *quantsty= s->qntsty;
+    Jpeg2000QuantStyle *quantsty= tile->qntsty + cb->compno;
     int ret, x, y, bandpos      = cb->bandno + (cb->reslevelno > 0);
     int magp;
 
@@ -1989,7 +1989,7 @@ static int jpeg2000_decode_cb(const AVCodecContext *avctx, void *td,
     cb->coded = 0;
 
     // Annex E (Equation E-2) ISO/IEC 15444-1:2019
-    magp = quantsty->expn[1/*subbandno*/] + quantsty->nguardbits - 1;
+    magp = quantsty->expn[cb->bandno + cb->compno*rlevel->nbands] + quantsty->nguardbits - 1;
 
     if (s->is_htj2k)
         ret = decode_htj2k(s, codsty, &t1, cblk,
