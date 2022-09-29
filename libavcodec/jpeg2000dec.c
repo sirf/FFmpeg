@@ -1032,10 +1032,12 @@ static int init_tile(AVCodecContext *avctx, void *td,
     if (!tile->comp)
         return AVERROR(ENOMEM);
 
+    if (compno == 0) {
     tile->coord[0][0] = av_clip(tilex       * (int64_t)s->tile_width  + s->tile_offset_x, s->image_offset_x, s->width);
     tile->coord[0][1] = av_clip((tilex + 1) * (int64_t)s->tile_width  + s->tile_offset_x, s->image_offset_x, s->width);
     tile->coord[1][0] = av_clip(tiley       * (int64_t)s->tile_height + s->tile_offset_y, s->image_offset_y, s->height);
     tile->coord[1][1] = av_clip((tiley + 1) * (int64_t)s->tile_height + s->tile_offset_y, s->image_offset_y, s->height);
+    }
 
         comp->coord_o[0][0] = tile->coord[0][0];
         comp->coord_o[0][1] = tile->coord[0][1];
