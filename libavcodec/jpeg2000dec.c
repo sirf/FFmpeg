@@ -1461,7 +1461,7 @@ static int jpeg2000_decode_packets_po_iteration(Jpeg2000DecoderContext *s, Jpeg2
         break;
 
     case JPEG2000_PGOD_RPCL:
-        av_log(s->avctx, AV_LOG_WARNING, "Progression order RPCL\n");
+        av_log(s->avctx, AV_LOG_DEBUG, "Progression order RPCL\n");
         ok_reslevel = 1;
         for (reslevelno = RSpoc; ok_reslevel && reslevelno < REpoc; reslevelno++) {
             ok_reslevel = 0;
@@ -1539,7 +1539,7 @@ static int jpeg2000_decode_packets_po_iteration(Jpeg2000DecoderContext *s, Jpeg2
         break;
 
     case JPEG2000_PGOD_PCRL:
-        av_log(s->avctx, AV_LOG_WARNING, "Progression order PCRL\n");
+        av_log(s->avctx, AV_LOG_DEBUG, "Progression order PCRL\n");
         step_x = 32;
         step_y = 32;
         for (compno = CSpoc; compno < CEpoc; compno++) {
@@ -2358,7 +2358,8 @@ static int jpeg2000_read_main_headers(Jpeg2000DecoderContext *s)
             ret = get_ppt(s, len);
             break;
         default:
-            av_log(s->avctx, AV_LOG_ERROR,
+            // don't complain loudly about 0xFF50 (extended capabilities)
+            av_log(s->avctx, marker == 0xFF50 ? AV_LOG_DEBUG : AV_LOG_ERROR,
                    "unsupported marker 0x%.4"PRIX16" at pos 0x%X\n",
                    marker, bytestream2_tell(&s->g) - 4);
             bytestream2_skip(&s->g, len - 2);
