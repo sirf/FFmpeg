@@ -402,7 +402,7 @@ static int create_filtergraph(AVFilterContext *ctx,
     const AVPixFmtDescriptor *out_desc = av_pix_fmt_desc_get(out->format);
     int emms = 0, m, n, o, res, fmt_identical, redo_yuv2rgb = 0, redo_rgb2yuv = 0;
 
-#define supported_depth(d) ((d) == 8 || (d) == 10 || (d) == 12)
+#define supported_depth(d) ((d) == 8 || (d) == 10 || (d) == 12 || (d) == 14 || (d) == 16)
 #define supported_subsampling(lcw, lch) \
     (((lcw) == 0 && (lch) == 0) || ((lcw) == 1 && (lch) == 0) || ((lcw) == 1 && (lch) == 1))
 #define supported_format(d) \
@@ -842,6 +842,8 @@ static int query_formats(AVFilterContext *ctx)
         AV_PIX_FMT_YUV420P,   AV_PIX_FMT_YUV422P,   AV_PIX_FMT_YUV444P,
         AV_PIX_FMT_YUV420P10, AV_PIX_FMT_YUV422P10, AV_PIX_FMT_YUV444P10,
         AV_PIX_FMT_YUV420P12, AV_PIX_FMT_YUV422P12, AV_PIX_FMT_YUV444P12,
+        AV_PIX_FMT_YUV420P14, AV_PIX_FMT_YUV422P14, AV_PIX_FMT_YUV444P14,
+        AV_PIX_FMT_YUV420P16, AV_PIX_FMT_YUV422P16, AV_PIX_FMT_YUV444P16,
         AV_PIX_FMT_YUVJ420P,  AV_PIX_FMT_YUVJ422P,  AV_PIX_FMT_YUVJ444P,
         AV_PIX_FMT_NONE
     };
@@ -961,12 +963,18 @@ static const AVOption colorspace_options[] = {
     ENUM("yuv420p",   AV_PIX_FMT_YUV420P,   "fmt"),
     ENUM("yuv420p10", AV_PIX_FMT_YUV420P10, "fmt"),
     ENUM("yuv420p12", AV_PIX_FMT_YUV420P12, "fmt"),
+    ENUM("yuv420p14", AV_PIX_FMT_YUV420P14, "fmt"),
+    ENUM("yuv420p16", AV_PIX_FMT_YUV420P16, "fmt"),
     ENUM("yuv422p",   AV_PIX_FMT_YUV422P,   "fmt"),
     ENUM("yuv422p10", AV_PIX_FMT_YUV422P10, "fmt"),
     ENUM("yuv422p12", AV_PIX_FMT_YUV422P12, "fmt"),
+    ENUM("yuv422p14", AV_PIX_FMT_YUV422P14, "fmt"),
+    ENUM("yuv422p16", AV_PIX_FMT_YUV422P16, "fmt"),
     ENUM("yuv444p",   AV_PIX_FMT_YUV444P,   "fmt"),
     ENUM("yuv444p10", AV_PIX_FMT_YUV444P10, "fmt"),
     ENUM("yuv444p12", AV_PIX_FMT_YUV444P12, "fmt"),
+    ENUM("yuv444p14", AV_PIX_FMT_YUV444P14, "fmt"),
+    ENUM("yuv444p16", AV_PIX_FMT_YUV444P16, "fmt"),
 
     { "fast",     "Ignore primary chromaticity and gamma correction",
       OFFSET(fast_mode), AV_OPT_TYPE_BOOL,  { .i64 = 0    },

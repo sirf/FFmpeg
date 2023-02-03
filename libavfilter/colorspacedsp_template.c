@@ -340,3 +340,11 @@ static void fn(rgb2yuv_fsb)(uint8_t *_yuv[3], const ptrdiff_t yuv_stride[3],
 #undef IN_BIT_DEPTH
 #define IN_BIT_DEPTH 12
 #include "colorspacedsp_yuv2yuv_template.c"
+
+#undef IN_BIT_DEPTH
+#define IN_BIT_DEPTH 14
+#include "colorspacedsp_yuv2yuv_template.c"
+
+#undef IN_BIT_DEPTH
+#define IN_BIT_DEPTH 16
+#include "colorspacedsp_yuv2yuv_template.c"
