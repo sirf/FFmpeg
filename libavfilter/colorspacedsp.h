@@ -46,6 +46,8 @@ enum BitDepthIndex {
     BPP_8,
     BPP_10,
     BPP_12,
+    BPP_14,
+    BPP_16,
     NB_BPP,
 };
 

@@ -9839,6 +9839,10 @@ BT.2020 for 10-bits content
 @item bt2020-12
 BT.2020 for 12-bits content
 
+@anchor{smpte2084}
+@item smpte2084
+SMPTE ST 2084 (perceptual quantizer) used by BT.2100. See @ref{inits} and @ref{onits}.
+
 @end table
 
 @anchor{primaries}
@@ -9979,6 +9983,32 @@ Override input transfer characteristics. Same accepted values as @ref{trc}.
 
 @item irange
 Override input color range. Same accepted values as @ref{range}.
+
+@anchor{inits}
+@item inits
+Required when input trc is @ref{smpte2084}.
+Specifies what the peak intermediate level should correspond to in nits (cd/m²).
+Perceptually dequantized values get scaled and clipped so that the range [0,inits] fits in the filter's internal psuedo-restricted 15-bit format.
+For inits < 10000 this corresponds to clipping of values outside the [0,inits]³ RGB cube.
+For inits = 10000 values are not clipped, but values in the lower range will get truncated to zero due to the internal format's limited range.
+
+With BT.2100 input basic usage is:
+@example
+colorspace=bt709:inits=100
+@end example
+which clips HDR to SDR in BT.709 colorspace.
+
+A more advanced use case is as follows:
+@example
+colorspace=bt709:inits=10000:trc=linear:format=yuv444p16,tonemap=hable:peak=0.01
+@end example
+which with BT.2100 input performs very basic tonemapping.
+
+@anchor{onits}
+@item onits
+Used in combination with @ref{smpte2084}, defaults to 10000.
+Similar to @ref{inits} but in reverse.
+Specifies how to treat the peak intermediate level in nits (cd/m²) prior to perceptual quantization (PQ) as per SMPTE ST 2084.
 
 @end table
 

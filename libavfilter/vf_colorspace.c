@@ -118,6 +118,7 @@ typedef struct ColorSpaceContext {
     enum AVColorTransferCharacteristic in_trc, out_trc, user_trc, user_itrc;
     enum AVColorPrimaries in_prm, out_prm, user_prm, user_iprm;
     enum AVPixelFormat in_format, user_format;
+    double user_inits, user_onits;
     int fast_mode;
     enum DitherMode dither;
     enum WhitepointAdaptation wp_adapt;
@@ -173,6 +174,7 @@ static const struct TransferCharacteristics transfer_characteristics[AVCOL_TRC_N
     [AVCOL_TRC_IEC61966_2_4] = { 1.099, 0.018, 0.45, 4.5 },
     [AVCOL_TRC_BT2020_10] = { 1.099,  0.018,  0.45, 4.5 },
     [AVCOL_TRC_BT2020_12] = { 1.0993, 0.0181, 0.45, 4.5 },
+    [AVCOL_TRC_SMPTE2084] = { 1.0,    0,      0,    0 }, // fake entry, actual TRC uses entirely separate formula
 };
 
 static const struct TransferCharacteristics *
@@ -197,6 +199,9 @@ static int fill_gamma_table(ColorSpaceContext *s)
     double in_ialpha = 1.0 / in_alpha, in_igamma = 1.0 / in_gamma, in_idelta = 1.0 / in_delta;
     double out_alpha = s->out_txchr->alpha, out_beta = s->out_txchr->beta;
     double out_gamma = s->out_txchr->gamma, out_delta = s->out_txchr->delta;
+    double m1 = 1305.0/8192, m2 = 2523.0/32, c2 = 2413.0/128, c3 = 2392.0/128, c1 = c3 - c2 + 1;
+    double im1 = 1.0 / m1, im2 = 1.0 / m2;
+    double iscale = 10000.0 / s->user_inits, ioscale = s->user_onits / 10000.0;
 
     s->lin_lut = av_malloc(sizeof(*s->lin_lut) * 32768 * 2);
     if (!s->lin_lut)
@@ -206,7 +211,15 @@ static int fill_gamma_table(ColorSpaceContext *s)
         double v = (n - 2048.0) / 28672.0, d, l;
 
         // delinearize
-        if (v <= -out_beta) {
+        if (s->out_trc == AVCOL_TRC_SMPTE2084) {
+            // see BT.2100-2
+            if (v >= 0) {
+                double vm1 = pow(v * ioscale, m1);
+                d = pow((c1 + c2 * vm1)/(1 + c3 * vm1), m2);
+            } else {
+                d = 0;
+            }
+        } else if (v <= -out_beta) {
             d = -out_alpha * pow(-v, out_gamma) + (out_alpha - 1.0);
         } else if (v < out_beta) {
             d = out_delta * v;
@@ -216,7 +229,19 @@ static int fill_gamma_table(ColorSpaceContext *s)
         s->delin_lut[n] = av_clip_int16(lrint(d * 28672.0));
 
         // linearize
-        if (v <= -in_beta * in_delta) {
+        if (s->in_trc == AVCOL_TRC_SMPTE2084) {
+            // see BT.2100-2
+            if (v >= 0) {
+                double vim2 = pow(v, im2);
+                // for inits < 10000 this will tonemap by clipping in RGB
+                // for inits = 10000 this makes unclipped linear values accessible when trc=linear
+                // note that precision will be lost in the lower end of PQ values, for example with
+                // 12-bit PQ and 16-bit output the first 422 values all get truncated to zero
+                l = iscale * pow((vim2 - c1 > 0 ? vim2 - c1 : 0) / (c2 - c3 * vim2), im1);
+            } else {
+                l = 0;
+            }
+        } else if (v <= -in_beta * in_delta) {
             l = -pow((1.0 - in_alpha - v) * in_ialpha, in_igamma);
         } else if (v < in_beta * in_delta) {
             l = v * in_idelta;
@@ -402,7 +427,7 @@ static int create_filtergraph(AVFilterContext *ctx,
     const AVPixFmtDescriptor *out_desc = av_pix_fmt_desc_get(out->format);
     int emms = 0, m, n, o, res, fmt_identical, redo_yuv2rgb = 0, redo_rgb2yuv = 0;
 
-#define supported_depth(d) ((d) == 8 || (d) == 10 || (d) == 12)
+#define supported_depth(d) ((d) == 8 || (d) == 10 || (d) == 12 || (d) == 14 || (d) == 16)
 #define supported_subsampling(lcw, lch) \
     (((lcw) == 0 && (lch) == 0) || ((lcw) == 1 && (lch) == 0) || ((lcw) == 1 && (lch) == 1))
 #define supported_format(d) \
@@ -512,6 +537,11 @@ static int create_filtergraph(AVFilterContext *ctx,
                    s->in_trc, av_color_transfer_name(s->in_trc));
             return AVERROR(EINVAL);
         }
+    }
+
+    if (s->in_trc == AVCOL_TRC_SMPTE2084 && s->user_inits <= 0) {
+        av_log(ctx, AV_LOG_ERROR, "smpte2084 requires inits\n");
+        return AVERROR(EINVAL);
     }
 
     if (!s->out_txchr) {
@@ -842,6 +872,8 @@ static int query_formats(AVFilterContext *ctx)
         AV_PIX_FMT_YUV420P,   AV_PIX_FMT_YUV422P,   AV_PIX_FMT_YUV444P,
         AV_PIX_FMT_YUV420P10, AV_PIX_FMT_YUV422P10, AV_PIX_FMT_YUV444P10,
         AV_PIX_FMT_YUV420P12, AV_PIX_FMT_YUV422P12, AV_PIX_FMT_YUV444P12,
+        AV_PIX_FMT_YUV420P14, AV_PIX_FMT_YUV422P14, AV_PIX_FMT_YUV444P14,
+        AV_PIX_FMT_YUV420P16, AV_PIX_FMT_YUV422P16, AV_PIX_FMT_YUV444P16,
         AV_PIX_FMT_YUVJ420P,  AV_PIX_FMT_YUVJ422P,  AV_PIX_FMT_YUVJ444P,
         AV_PIX_FMT_NONE
     };
@@ -954,6 +986,7 @@ static const AVOption colorspace_options[] = {
     ENUM("iec61966-2-4", AVCOL_TRC_IEC61966_2_4, "trc"),
     ENUM("bt2020-10",    AVCOL_TRC_BT2020_10,    "trc"),
     ENUM("bt2020-12",    AVCOL_TRC_BT2020_12,    "trc"),
+    ENUM("smpte2084",    AVCOL_TRC_SMPTE2084,    "trc"),
 
     { "format",   "Output pixel format",
       OFFSET(user_format), AV_OPT_TYPE_INT,  { .i64 = AV_PIX_FMT_NONE },
@@ -961,12 +994,18 @@ static const AVOption colorspace_options[] = {
     ENUM("yuv420p",   AV_PIX_FMT_YUV420P,   "fmt"),
     ENUM("yuv420p10", AV_PIX_FMT_YUV420P10, "fmt"),
     ENUM("yuv420p12", AV_PIX_FMT_YUV420P12, "fmt"),
+    ENUM("yuv420p14", AV_PIX_FMT_YUV420P14, "fmt"),
+    ENUM("yuv420p16", AV_PIX_FMT_YUV420P16, "fmt"),
     ENUM("yuv422p",   AV_PIX_FMT_YUV422P,   "fmt"),
     ENUM("yuv422p10", AV_PIX_FMT_YUV422P10, "fmt"),
     ENUM("yuv422p12", AV_PIX_FMT_YUV422P12, "fmt"),
+    ENUM("yuv422p14", AV_PIX_FMT_YUV422P14, "fmt"),
+    ENUM("yuv422p16", AV_PIX_FMT_YUV422P16, "fmt"),
     ENUM("yuv444p",   AV_PIX_FMT_YUV444P,   "fmt"),
     ENUM("yuv444p10", AV_PIX_FMT_YUV444P10, "fmt"),
     ENUM("yuv444p12", AV_PIX_FMT_YUV444P12, "fmt"),
+    ENUM("yuv444p14", AV_PIX_FMT_YUV444P14, "fmt"),
+    ENUM("yuv444p16", AV_PIX_FMT_YUV444P16, "fmt"),
 
     { "fast",     "Ignore primary chromaticity and gamma correction",
       OFFSET(fast_mode), AV_OPT_TYPE_BOOL,  { .i64 = 0    },
@@ -1000,6 +1039,10 @@ static const AVOption colorspace_options[] = {
     { "itrc",       "Input transfer characteristics",
       OFFSET(user_itrc),  AV_OPT_TYPE_INT, { .i64 = AVCOL_TRC_UNSPECIFIED },
       AVCOL_TRC_RESERVED0, AVCOL_TRC_NB - 1, FLAGS, "trc" },
+    { "inits",      "Input nits. Specifies how PQ (SMPTE ST 2084) values are to be mapped to intermediate/output linear RGB",
+      OFFSET(user_inits), AV_OPT_TYPE_DOUBLE, {.dbl = 0}, 0, 10000, FLAGS },
+    { "onits",      "Output nits. Specifies how input/intermediate linear RGB is scaled for output PQ (SMPTE ST 2084) values",
+      OFFSET(user_onits), AV_OPT_TYPE_DOUBLE, {.dbl = 10000}, 1, 10000, FLAGS },
 
     { NULL }
 };

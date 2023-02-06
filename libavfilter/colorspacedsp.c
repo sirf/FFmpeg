@@ -39,6 +39,14 @@
 #define BIT_DEPTH 12
 #include "colorspacedsp_template.c"
 
+#undef BIT_DEPTH
+#define BIT_DEPTH 14
+#include "colorspacedsp_template.c"
+
+#undef BIT_DEPTH
+#define BIT_DEPTH 16
+#include "colorspacedsp_template.c"
+
 #undef SS_W
 #undef SS_H
 
@@ -57,6 +65,14 @@
 #define BIT_DEPTH 12
 #include "colorspacedsp_template.c"
 
+#undef BIT_DEPTH
+#define BIT_DEPTH 14
+#include "colorspacedsp_template.c"
+
+#undef BIT_DEPTH
+#define BIT_DEPTH 16
+#include "colorspacedsp_template.c"
+
 #undef SS_W
 #undef SS_H
 
@@ -73,6 +89,14 @@
 
 #undef BIT_DEPTH
 #define BIT_DEPTH 12
+#include "colorspacedsp_template.c"
+
+#undef BIT_DEPTH
+#define BIT_DEPTH 14
+#include "colorspacedsp_template.c"
+
+#undef BIT_DEPTH
+#define BIT_DEPTH 16
 #include "colorspacedsp_template.c"
 
 static void multiply3x3_c(int16_t *buf[3], ptrdiff_t stride,
@@ -109,6 +133,8 @@ void ff_colorspacedsp_init(ColorSpaceDSPContext *dsp)
     init_yuv2rgb_fn( 8);
     init_yuv2rgb_fn(10);
     init_yuv2rgb_fn(12);
+    init_yuv2rgb_fn(14);
+    init_yuv2rgb_fn(16);
 
 #define init_rgb2yuv_fn(bit) \
     dsp->rgb2yuv[BPP_##bit][SS_444] = rgb2yuv_444p##bit##_c; \
@@ -118,6 +144,8 @@ void ff_colorspacedsp_init(ColorSpaceDSPContext *dsp)
     init_rgb2yuv_fn( 8);
     init_rgb2yuv_fn(10);
     init_rgb2yuv_fn(12);
+    init_rgb2yuv_fn(14);
+    init_rgb2yuv_fn(16);
 
 #define init_rgb2yuv_fsb_fn(bit) \
     dsp->rgb2yuv_fsb[BPP_##bit][SS_444] = rgb2yuv_fsb_444p##bit##_c; \
@@ -127,6 +155,8 @@ void ff_colorspacedsp_init(ColorSpaceDSPContext *dsp)
     init_rgb2yuv_fsb_fn( 8);
     init_rgb2yuv_fsb_fn(10);
     init_rgb2yuv_fsb_fn(12);
+    init_rgb2yuv_fsb_fn(14);
+    init_rgb2yuv_fsb_fn(16);
 
 #define init_yuv2yuv_fn(idx1, bit1, bit2) \
     dsp->yuv2yuv[idx1][BPP_##bit2][SS_444] = yuv2yuv_444p##bit1##to##bit2##_c; \
@@ -135,11 +165,15 @@ void ff_colorspacedsp_init(ColorSpaceDSPContext *dsp)
 #define init_yuv2yuv_fns(bit1) \
     init_yuv2yuv_fn(BPP_##bit1, bit1,  8); \
     init_yuv2yuv_fn(BPP_##bit1, bit1, 10); \
-    init_yuv2yuv_fn(BPP_##bit1, bit1, 12)
+    init_yuv2yuv_fn(BPP_##bit1, bit1, 12); \
+    init_yuv2yuv_fn(BPP_##bit1, bit1, 14); \
+    init_yuv2yuv_fn(BPP_##bit1, bit1, 16)
 
     init_yuv2yuv_fns( 8);
     init_yuv2yuv_fns(10);
     init_yuv2yuv_fns(12);
+    init_yuv2yuv_fns(14);
+    init_yuv2yuv_fns(16);
 
     dsp->multiply3x3 = multiply3x3_c;
 
