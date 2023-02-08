@@ -110,8 +110,6 @@ Generic Parts:
     lzw.*                               Michael Niedermayer
   floating point AAN DCT:
     faandct.c, faandct.h                Michael Niedermayer
-  Non-power-of-two MDCT:
-    mdct15.c, mdct15.h                  Rostislav Pehlivanov
   Golomb coding:
     golomb.c, golomb.h                  Michael Niedermayer
   motion estimation:
@@ -136,6 +134,7 @@ Codecs:
   adpcm.c                               Zane van Iperen
   alacenc.c                             Jaikrishnan Menon
   alsdec.c                              Thilo Borgmann, Umair Khan
+  amfenc*                               Dmitrii Ovchinnikov
   aptx.c                                Aurelien Jacobs
   ass*                                  Aurelien Jacobs
   asv*                                  Michael Niedermayer
@@ -152,7 +151,6 @@ Codecs:
   ccaption_dec.c                        Anshul Maheshwari, Aman Gupta
   cljr                                  Alex Beregszaszi
   cpia.c                                Stephan Hilb
-  crystalhd.c                           Philip Langdale
   cscd.c                                Reimar Doeffinger
   cuviddec.c                            Timo Rothenpieler
   dca*                                  foo86
@@ -266,7 +264,6 @@ Codecs:
   xwd*                                  Paul B Mahol
 
 Hardware acceleration:
-  crystalhd.c                           Philip Langdale
   dxva2*                                Hendrik Leppkes, Laurent Aimar, Steve Lhomme
   d3d11va*                              Steve Lhomme
   mediacodec*                           Matthieu Bouron, Aman Gupta

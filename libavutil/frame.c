@@ -304,7 +304,11 @@ FF_DISABLE_DEPRECATION_WARNINGS
 FF_ENABLE_DEPRECATION_WARNINGS
 #endif
     dst->time_base              = src->time_base;
+#if FF_API_REORDERED_OPAQUE
+FF_DISABLE_DEPRECATION_WARNINGS
     dst->reordered_opaque       = src->reordered_opaque;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
     dst->quality                = src->quality;
     dst->best_effort_timestamp  = src->best_effort_timestamp;
     dst->coded_picture_number   = src->coded_picture_number;
@@ -831,6 +835,7 @@ const char *av_frame_side_data_name(enum AVFrameSideDataType type)
     case AV_FRAME_DATA_DETECTION_BBOXES:            return "Bounding boxes for object detection and classification";
     case AV_FRAME_DATA_DOVI_RPU_BUFFER:             return "Dolby Vision RPU Data";
     case AV_FRAME_DATA_DOVI_METADATA:               return "Dolby Vision Metadata";
+    case AV_FRAME_DATA_AMBIENT_VIEWING_ENVIRONMENT: return "Ambient viewing environment";
     }
     return NULL;
 }
